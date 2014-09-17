@@ -749,8 +749,10 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 	return device;
 }
 
-DEFINE_DEVICE_FACTORY_INTERNAL(VLAN, Vlan, vlan, \
-	factory_iface->new_link = new_link; \
+NM_DEVICE_FACTORY_DEFINE_INTERNAL (VLAN, Vlan, vlan,
+	NM_DEVICE_FACTORY_DECLARE_LINK_TYPES    (NM_LINK_TYPE_VLAN)
+	NM_DEVICE_FACTORY_DECLARE_SETTING_TYPES (NM_SETTING_VLAN_SETTING_NAME),
+	factory_iface->new_link = new_link;
 	factory_iface->create_virtual_device_for_connection = create_virtual_device_for_connection;
 	)
 

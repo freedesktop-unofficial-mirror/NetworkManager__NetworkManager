@@ -1755,7 +1755,9 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 	return NULL;
 }
 
-DEFINE_DEVICE_FACTORY_INTERNAL(ETHERNET, Ethernet, ethernet, \
-	factory_iface->new_link = new_link; \
+NM_DEVICE_FACTORY_DEFINE_INTERNAL (ETHERNET, Ethernet, ethernet,
+	NM_DEVICE_FACTORY_DECLARE_LINK_TYPES    (NM_LINK_TYPE_ETHERNET)
+	NM_DEVICE_FACTORY_DECLARE_SETTING_TYPES (NM_SETTING_WIRED_SETTING_NAME, NM_SETTING_PPPOE_SETTING_NAME),
+	factory_iface->new_link = new_link;
 	)
 
