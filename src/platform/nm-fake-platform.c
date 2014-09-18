@@ -174,7 +174,7 @@ _nm_platform_link_get (NMPlatform *platform, int ifindex, NMPlatformLink *l)
 {
 	NMFakePlatformLink *device = link_get (platform, ifindex);
 
-	if (device)
+	if (device && l)
 		*l = device->link;
 	return !!device;
 }
@@ -197,7 +197,12 @@ _link_announce (NMFakePlatformLinkData *data)
 }
 
 static gboolean
-link_add (NMPlatform *platform, const char *name, NMLinkType type, const void *address, size_t address_len)
+link_add (NMPlatform *platform,
+          const char *name,
+          NMLinkType type,
+          const void *address,
+          size_t address_len,
+          NMPlatformLink *out_link)
 {
 	NMFakePlatformPrivate *priv = NM_FAKE_PLATFORM_GET_PRIVATE (platform);
 	NMFakePlatformLink device;
@@ -213,6 +218,8 @@ link_add (NMPlatform *platform, const char *name, NMLinkType type, const void *a
 		g_idle_add ((GSourceFunc) _link_announce, data);
 	}
 
+	if (out_link)
+		*out_link = device.link;
 	return TRUE;
 }
 
@@ -617,11 +624,11 @@ slave_get_option (NMPlatform *platform, int slave, const char *option)
 }
 
 static gboolean
-vlan_add (NMPlatform *platform, const char *name, int parent, int vlan_id, guint32 vlan_flags)
+vlan_add (NMPlatform *platform, const char *name, int parent, int vlan_id, guint32 vlan_flags, NMPlatformLink *out_link)
 {
 	NMFakePlatformLink *device;
 
-	if (!link_add (platform, name, NM_LINK_TYPE_VLAN, NULL, 0))
+	if (!link_add (platform, name, NM_LINK_TYPE_VLAN, NULL, 0, NULL))
 		return FALSE;
 
 	device = link_get (platform, link_get_ifindex (platform, name));
@@ -631,6 +638,8 @@ vlan_add (NMPlatform *platform, const char *name, int parent, int vlan_id, guint
 	device->vlan_id = vlan_id;
 	device->link.parent = parent;
 
+	if (out_link)
+		*out_link = device->link;
 	return TRUE;
 }
 
@@ -662,7 +671,7 @@ vlan_set_egress_map (NMPlatform *platform, int ifindex, int from, int to)
 }
 
 static gboolean
-infiniband_partition_add (NMPlatform *platform, int parent, int p_key)
+infiniband_partition_add (NMPlatform *platform, int parent, int p_key, NMPlatformLink *out_link)
 {
 	NMFakePlatformLink *parent_device;
 	char *name;
@@ -672,7 +681,7 @@ infiniband_partition_add (NMPlatform *platform, int parent, int p_key)
 	g_return_val_if_fail (parent_device != NULL, FALSE);
 
 	name = g_strdup_printf ("%s.%04x", parent_device->link.name, p_key);
-	success = link_add (platform, name, NM_LINK_TYPE_INFINIBAND, NULL, 0);
+	success = link_add (platform, name, NM_LINK_TYPE_INFINIBAND, NULL, 0, out_link);
 	g_free (name);
 
 	return success;
@@ -1340,15 +1349,15 @@ static gboolean
 setup (NMPlatform *platform)
 {
 	/* skip zero element */
-	link_add (platform, NULL, NM_LINK_TYPE_NONE, NULL, 0);
+	link_add (platform, NULL, NM_LINK_TYPE_NONE, NULL, 0, NULL);
 
 	/* add loopback interface */
-	link_add (platform, "lo", NM_LINK_TYPE_LOOPBACK, NULL, 0);
+	link_add (platform, "lo", NM_LINK_TYPE_LOOPBACK, NULL, 0, NULL);
 
 	/* add some ethernets */
-	link_add (platform, "eth0", NM_LINK_TYPE_ETHERNET, NULL, 0);
-	link_add (platform, "eth1", NM_LINK_TYPE_ETHERNET, NULL, 0);
-	link_add (platform, "eth2", NM_LINK_TYPE_ETHERNET, NULL, 0);
+	link_add (platform, "eth0", NM_LINK_TYPE_ETHERNET, NULL, 0, NULL);
+	link_add (platform, "eth1", NM_LINK_TYPE_ETHERNET, NULL, 0, NULL);
+	link_add (platform, "eth2", NM_LINK_TYPE_ETHERNET, NULL, 0, NULL);
 
 	return TRUE;
 }

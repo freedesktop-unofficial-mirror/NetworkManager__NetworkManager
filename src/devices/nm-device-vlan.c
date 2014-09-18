@@ -717,7 +717,8 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 	if (   !nm_platform_vlan_add (iface,
 	                              nm_device_get_ifindex (parent),
 	                              nm_setting_vlan_get_id (s_vlan),
-	                              nm_setting_vlan_get_flags (s_vlan))
+	                              nm_setting_vlan_get_flags (s_vlan),
+	                              NULL)
 	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
 		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
 		             "Failed to create VLAN interface '%s' for '%s': %s",

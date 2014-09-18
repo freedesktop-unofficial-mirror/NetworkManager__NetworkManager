@@ -690,7 +690,7 @@ nm_device_team_new_for_connection (NMConnection *connection, GError **error)
 
 	g_assert (iface);
 
-	if (   !nm_platform_team_add (iface)
+	if (   !nm_platform_team_add (iface, NULL)
 	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
 		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
 		             "Failed to create team master interface '%s' for '%s': %s",

@@ -631,7 +631,7 @@ fixture_setup (test_fixture *fixture, gconstpointer user_data)
 	                                "nm-test-device0");
 	nm_platform_link_delete (nm_platform_link_get_ifindex ("nm-test-device0"));
 	g_assert (!nm_platform_link_exists ("nm-test-device0"));
-	g_assert (nm_platform_dummy_add ("nm-test-device0"));
+	g_assert (nm_platform_dummy_add ("nm-test-device0", NULL));
 	wait_signal (link_added);
 	free_signal (link_added);
 	fixture->ifindex0 = nm_platform_link_get_ifindex ("nm-test-device0");
@@ -643,7 +643,7 @@ fixture_setup (test_fixture *fixture, gconstpointer user_data)
 	                                "nm-test-device1");
 	nm_platform_link_delete (nm_platform_link_get_ifindex ("nm-test-device1"));
 	g_assert (!nm_platform_link_exists ("nm-test-device1"));
-	g_assert (nm_platform_dummy_add ("nm-test-device1"));
+	g_assert (nm_platform_dummy_add ("nm-test-device1", NULL));
 	wait_signal (link_added);
 	free_signal (link_added);
 	fixture->ifindex1 = nm_platform_link_get_ifindex ("nm-test-device1");

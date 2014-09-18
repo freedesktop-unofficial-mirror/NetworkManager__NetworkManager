@@ -572,7 +572,7 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 
 	g_assert (iface);
 
-	if (   !nm_platform_bond_add (iface)
+	if (   !nm_platform_bond_add (iface, NULL)
 	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
 		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
 		             "Failed to create bond interface '%s' for '%s': %s",
