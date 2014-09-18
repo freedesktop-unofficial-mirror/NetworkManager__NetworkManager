@@ -128,6 +128,34 @@ struct _NMDeviceFactory {
 	                                                    NMDevice *parent,
 	                                                    GError **error);
 
+	/**
+	 * get_connection_parent:
+	 * @factory: the #NMDeviceFactory
+	 * @connection: the #NMConnection to return the parent name for, if supported
+	 *
+	 * Given a connection, returns the a parent interface name, parent connection
+	 * UUID, or parent device hardware address for @connection.
+	 *
+	 * Returns: the parent interface name, parent connection UUID, parent
+	 *   device hardware address, or %NULL
+	 */
+	const char * (*get_connection_parent) (NMDeviceFactory *factory,
+	                                       NMConnection *connection);
+
+	/**
+	 * get_virtual_iface_name:
+	 * @factory: the #NMDeviceFactory
+	 * @connection: the #NMConnection to return the virtual interface name for
+	 *
+	 * Given a connection, returns the interface name that a device activating
+	 * that connection would have, possibly using parent devices for
+	 * constructing the name.
+	 *
+	 * Returns: the interface name, or %NULL
+	 */
+	char * (*get_virtual_iface_name) (NMDeviceFactory *factory,
+	                                  NMConnection *connection,
+	                                  const char *parent_iface);
 
 	/* Signals */
 
@@ -162,6 +190,13 @@ void       nm_device_factory_get_supported_types (NMDeviceFactory *factory,
                                                   const NMLinkType **out_link_types,
                                                   const char ***out_setting_types);
 
+const char *nm_device_factory_get_connection_parent (NMDeviceFactory *factory,
+                                                     NMConnection *connection);
+
+char *     nm_device_factory_get_virtual_iface_name (NMDeviceFactory *factory,
+                                                     NMConnection *connection,
+                                                     const char *parent_iface);
+
 void       nm_device_factory_start       (NMDeviceFactory *factory);
 
 NMDevice * nm_device_factory_new_link    (NMDeviceFactory *factory,
@@ -182,17 +217,17 @@ gboolean   nm_device_factory_emit_component_added (NMDeviceFactory *factory,
 #define NM_DEVICE_FACTORY_DECLARE_SETTING_TYPES(...) \
 	{ static const char *_df_settings[] = { __VA_ARGS__, NULL }; *out_setting_types = _df_settings; }
 
+extern const NMLinkType _nm_device_factory_no_default_links[];
+extern const char *_nm_device_factory_no_default_settings[];
+
 #define NM_DEVICE_FACTORY_DECLARE_TYPES(...) \
 	static void \
 	get_supported_types (NMDeviceFactory *factory, \
 	                     const NMLinkType **out_link_types, \
 	                     const char ***out_setting_types) \
 	{ \
-		static const NMLinkType default_links[] = { NM_LINK_TYPE_NONE }; \
-		static const char *default_settings[] = { NULL }; \
- \
-		*out_link_types = default_links; \
-		*out_setting_types = default_settings; \
+		*out_link_types = _nm_device_factory_no_default_links; \
+		*out_setting_types = _nm_device_factory_no_default_settings; \
  \
 		{ __VA_ARGS__; } \
 	} \
