@@ -184,7 +184,6 @@ typedef struct {
 	char *        path;
 	char *        iface;   /* may change, could be renamed by user */
 	int           ifindex;
-	gboolean      is_software;
 	gboolean      real;
 	char *        ip_iface;
 	int           ip_ifindex;
@@ -542,9 +541,7 @@ nm_device_get_ifindex (NMDevice *self)
 gboolean
 nm_device_is_software (NMDevice *self)
 {
-	NMDevicePrivate *priv = NM_DEVICE_GET_PRIVATE (self);
-
-	return priv->is_software;
+	return !!(NM_DEVICE_GET_PRIVATE (self)->capabilities & NM_DEVICE_CAP_IS_SOFTWARE);
 }
 
 /**
@@ -1515,6 +1512,10 @@ setup (NMDevice *self, NMPlatformLink *plink)
 
 	if (priv->ifindex > 0) {
 		_LOGD (LOGD_DEVICE, "setup(): %s, kernel ifindex %d", G_OBJECT_TYPE_NAME (self), priv->ifindex);
+		priv->physical_port_id = nm_platform_link_get_physical_port_id (priv->ifindex);
+		priv->dev_id = nm_platform_link_get_dev_id (priv->ifindex);
+		if (nm_platform_link_is_software (priv->ifindex))
+			priv->capabilities |= NM_DEVICE_CAP_IS_SOFTWARE;
 
 		nm_platform_link_get_driver_info (priv->ifindex, &priv->driver_version, &priv->firmware_version);
 		if (priv->driver_version)
@@ -1525,6 +1526,7 @@ setup (NMDevice *self, NMPlatformLink *plink)
 
 	if (NM_DEVICE_GET_CLASS (self)->get_generic_capabilities)
 		priv->capabilities |= NM_DEVICE_GET_CLASS (self)->get_generic_capabilities (self);
+	g_object_notify (G_OBJECT (self), NM_DEVICE_CAPABILITIES);
 
 	if (!priv->udi) {
 		/* Use a placeholder UDI until we get a real one */
@@ -1580,15 +1582,6 @@ setup (NMDevice *self, NMPlatformLink *plink)
 		priv->carrier = TRUE;
 	}
 
-	if (priv->ifindex > 0) {
-		priv->is_software = nm_platform_link_is_software (priv->ifindex);
-		priv->physical_port_id = nm_platform_link_get_physical_port_id (priv->ifindex);
-		priv->dev_id = nm_platform_link_get_dev_id (priv->ifindex);
-	}
-
-	/* Indicate software device in capabilities. */
-	if (priv->is_software)
-		priv->capabilities |= NM_DEVICE_CAP_IS_SOFTWARE;
 	g_object_notify (G_OBJECT (self), NM_DEVICE_CAPABILITIES);
 
 	/* Enslave ourselves */
@@ -8703,6 +8696,9 @@ constructed (GObject *object)
 	NMDevice *self = NM_DEVICE (object);
 	NMDevicePrivate *priv = NM_DEVICE_GET_PRIVATE (self);
 	NMPlatform *platform;
+
+	if (NM_DEVICE_GET_CLASS (self)->get_generic_capabilities)
+		priv->capabilities |= NM_DEVICE_GET_CLASS (self)->get_generic_capabilities (self);
 
 	/* Watch for external IP config changes */
 	platform = nm_platform_get ();
