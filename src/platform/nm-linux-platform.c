@@ -2843,6 +2843,32 @@ link_get_dev_id (NMPlatform *platform, int ifindex)
 	return errno ? 0 : (int) int_val;
 }
 
+static gboolean
+link_get_driver_info (NMPlatform *platform,
+                      int ifindex,
+                      char **out_driver_version,
+                      char **out_fw_version)
+{
+	gs_free struct ethtool_drvinfo *info = NULL;
+	const char *ifname;
+
+	ifname = nm_platform_link_get_name (ifindex);
+	if (!ifname)
+		return FALSE;
+
+	info = g_malloc0 (sizeof (*info) + sizeof (guint32));
+	info->cmd = ETHTOOL_GDRVINFO;
+	if (!ethtool_get (ifname, info))
+		return FALSE;
+
+	if (out_driver_version)
+		*out_driver_version = g_strdup (info->version);
+	if (out_fw_version)
+		*out_fw_version = g_strdup (info->fw_version);
+
+	return TRUE;
+}
+
 static int
 vlan_add (NMPlatform *platform,
           const char *name,
@@ -4721,6 +4747,7 @@ nm_linux_platform_class_init (NMLinuxPlatformClass *klass)
 	platform_class->link_get_physical_port_id = link_get_physical_port_id;
 	platform_class->link_get_dev_id = link_get_dev_id;
 	platform_class->link_get_wake_on_lan = link_get_wake_on_lan;
+	platform_class->link_get_driver_info = link_get_driver_info;
 
 	platform_class->link_supports_carrier_detect = link_supports_carrier_detect;
 	platform_class->link_supports_vlans = link_supports_vlans;
