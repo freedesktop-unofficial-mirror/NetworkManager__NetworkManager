@@ -205,7 +205,9 @@ G_DEFINE_TYPE (NMManager, nm_manager, G_TYPE_OBJECT)
 
 enum {
 	DEVICE_ADDED,
+	INTERNAL_DEVICE_ADDED,
 	DEVICE_REMOVED,
+	INTERNAL_DEVICE_REMOVED,
 	STATE_CHANGED,
 	CHECK_PERMISSIONS,
 	USER_PERMISSIONS_CHANGED,
@@ -813,9 +815,13 @@ remove_device (NMManager *manager,
 	nm_settings_device_removed (priv->settings, device, quitting);
 	priv->devices = g_slist_remove (priv->devices, device);
 
-	g_signal_emit (manager, signals[DEVICE_REMOVED], 0, device);
-	g_object_notify (G_OBJECT (manager), NM_MANAGER_DEVICES);
-	nm_device_removed (device);
+	if (nm_device_is_real (device)) {
+		g_signal_emit (manager, signals[DEVICE_REMOVED], 0, device);
+		g_object_notify (G_OBJECT (manager), NM_MANAGER_DEVICES);
+		nm_device_removed (device);
+	}
+	g_signal_emit (manager, signals[INTERNAL_DEVICE_REMOVED], 0, device);
+	g_object_notify (G_OBJECT (manager), NM_MANAGER_ALL_DEVICES);
 
 	nm_dbus_manager_unregister_object (priv->dbus_mgr, device);
 	g_object_unref (device);
@@ -1713,6 +1719,10 @@ device_realized (NMDevice *device,
 	int ifindex;
 	gboolean assumed;
 
+	/* Emit D-Bus signals */
+	g_signal_emit (self, signals[DEVICE_ADDED], 0, device);
+	g_object_notify (G_OBJECT (self), NM_MANAGER_DEVICES);
+
 	/* Loopback device never gets managed */
 	ifindex = nm_device_get_ifindex (device);
 	if (ifindex > 0 && nm_platform_link_get_type (ifindex) == NM_LINK_TYPE_LOOPBACK)
@@ -1835,8 +1845,8 @@ add_device (NMManager *self, NMDevice *device)
 	nm_device_finish_init (device);
 
 	nm_settings_device_added (priv->settings, device);
-	g_signal_emit (self, signals[DEVICE_ADDED], 0, device);
-	g_object_notify (G_OBJECT (self), NM_MANAGER_DEVICES);
+	g_signal_emit (self, signals[INTERNAL_DEVICE_ADDED], 0, device);
+	g_object_notify (G_OBJECT (self), NM_MANAGER_ALL_DEVICES);
 }
 
 /*******************************************************************/
@@ -5110,6 +5120,8 @@ nm_manager_class_init (NMManagerClass *manager_class)
 		                     G_PARAM_STATIC_STRINGS));
 
 	/* signals */
+
+	/* D-Bus exported; emitted only for realized devices */
 	signals[DEVICE_ADDED] =
 		g_signal_new ("device-added",
 		              G_OBJECT_CLASS_TYPE (object_class),
@@ -5118,11 +5130,28 @@ nm_manager_class_init (NMManagerClass *manager_class)
 		              NULL, NULL, NULL,
 		              G_TYPE_NONE, 1, G_TYPE_OBJECT);
 
+	/* Emitted for both realized devices and placeholder devices */
+	signals[INTERNAL_DEVICE_ADDED] =
+		g_signal_new ("internal-device-added",
+		              G_OBJECT_CLASS_TYPE (object_class),
+		              G_SIGNAL_RUN_FIRST, 0,
+		              NULL, NULL, NULL,
+		              G_TYPE_NONE, 1, G_TYPE_OBJECT);
+
+	/* D-Bus exported; emitted only for realized devices */
 	signals[DEVICE_REMOVED] =
 		g_signal_new ("device-removed",
 		              G_OBJECT_CLASS_TYPE (object_class),
 		              G_SIGNAL_RUN_FIRST,
 		              G_STRUCT_OFFSET (NMManagerClass, device_removed),
+		              NULL, NULL, NULL,
+		              G_TYPE_NONE, 1, G_TYPE_OBJECT);
+
+	/* Emitted for both realized devices and placeholder devices */
+	signals[INTERNAL_DEVICE_REMOVED] =
+		g_signal_new ("internal-device-removed",
+		              G_OBJECT_CLASS_TYPE (object_class),
+		              G_SIGNAL_RUN_FIRST, 0,
 		              NULL, NULL, NULL,
 		              G_TYPE_NONE, 1, G_TYPE_OBJECT);
 
