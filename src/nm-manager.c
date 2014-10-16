@@ -808,9 +808,7 @@ aipd_handle_event (GDBusProxy *proxy,
                    gpointer user_data)
 {
 	NMManager *manager = NM_MANAGER (user_data);
-	NMManagerPrivate *priv = NM_MANAGER_GET_PRIVATE (manager);
-	GSList *iter;
-	gboolean handled = FALSE;
+	NMDevice *device;
 
 	if (   (strcmp (event, "BIND") != 0)
 	    && (strcmp (event, "CONFLICT") != 0)
@@ -820,17 +818,10 @@ aipd_handle_event (GDBusProxy *proxy,
 		return;
 	}
 
-	for (iter = priv->devices; iter; iter = g_slist_next (iter)) {
-		NMDevice *candidate = NM_DEVICE (iter->data);
-
-		if (!strcmp (nm_device_get_iface (candidate), iface)) {
-			nm_device_handle_autoip4_event (candidate, event, address);
-			handled = TRUE;
-			break;
-		}
-	}
-
-	if (!handled)
+	device = find_device_by_ip_iface (manager, iface);
+	if (device)
+		nm_device_handle_autoip4_event (device, event, address);
+	else
 		nm_log_warn (LOGD_AUTOIP4, "(%s): unhandled avahi-autoipd event", iface);
 }
 
