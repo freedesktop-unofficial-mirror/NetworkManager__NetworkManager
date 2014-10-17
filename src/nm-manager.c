@@ -2942,11 +2942,11 @@ validate_activation_request (NMManager *self,
 	} else
 		device = nm_manager_get_best_device_for_connection (self, connection);
 
-	if (!device) {
+	if (!device && !vpn) {
 		gboolean is_software = nm_connection_is_virtual (connection);
 
 		/* VPN and software-device connections don't need a device yet */
-		if (!vpn && !is_software) {
+		if (!is_software) {
 			g_set_error_literal (error,
 			                     NM_MANAGER_ERROR,
 			                     NM_MANAGER_ERROR_UNKNOWN_DEVICE,
@@ -2967,7 +2967,7 @@ validate_activation_request (NMManager *self,
 		}
 	}
 
-	if (!device) {
+	if ((!vpn || device_path) && !device) {
 		g_set_error_literal (error,
 		                     NM_MANAGER_ERROR,
 		                     NM_MANAGER_ERROR_UNKNOWN_DEVICE,
