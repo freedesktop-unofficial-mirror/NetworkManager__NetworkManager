@@ -59,6 +59,35 @@
 #define CLOCK_BOOTTIME 7
 #endif
 
+G_STATIC_ASSERT (sizeof (NMUtilsTestFlags) <= sizeof (int));
+int _nm_utils_testing = 0;
+
+gboolean
+nm_utils_get_testing_initialized ()
+{
+	return NM_FLAGS_HAS ((NMUtilsTestFlags) g_atomic_int_get (&_nm_utils_testing), _NM_UTILS_TEST_INITIALIZED);
+}
+
+NMUtilsTestFlags
+nm_utils_get_testing ()
+{
+	if (g_atomic_int_compare_and_exchange (&_nm_utils_testing, 0, (int) _NM_UTILS_TEST_INITIALIZED))
+		return NM_UTILS_TEST_NONE;
+	return ((NMUtilsTestFlags) _nm_utils_testing) & (~_NM_UTILS_TEST_INITIALIZED);
+}
+
+void
+_nm_utils_set_testing (NMUtilsTestFlags flags)
+{
+	g_assert (!NM_FLAGS_ANY (flags, ~NM_UTILS_TEST_ALL));
+
+	/* mask out everything except ALL, and always set GENERAL. */
+	flags = (flags & NM_UTILS_TEST_ALL) | (_NM_UTILS_TEST_GENERAL | _NM_UTILS_TEST_INITIALIZED);
+
+	if (!g_atomic_int_compare_and_exchange (&_nm_utils_testing, 0, (int) flags))
+		g_assert_not_reached ();
+}
+
 /*
  * nm_ethernet_address_is_valid:
  * @addr: pointer to a binary or ASCII Ethernet address

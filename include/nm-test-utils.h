@@ -184,6 +184,11 @@ __nmtst_init (int *argc, char ***argv, gboolean assert_logging, const char *log_
 	g_assert (!argc || (g_strv_length (*argv) == *argc));
 	g_assert (!assert_logging || (!log_level && !log_domains));
 
+#ifdef __NETWORKMANAGER_UTILS_H__
+	if (!nm_utils_get_testing_initialized ())
+		_nm_utils_set_testing (_NM_UTILS_TEST_GENERAL);
+#endif
+
 	if (argc)
 		__nmtst_internal.orig_argv = g_strdupv (*argv);
 
