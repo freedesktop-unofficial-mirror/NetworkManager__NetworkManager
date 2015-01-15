@@ -193,9 +193,13 @@ test_config_no_auto_default (void)
 	                       "--no-auto-default", state_file,
 	                       NULL);
 
+	g_test_expect_message ("NetworkManager", G_LOG_LEVEL_WARNING, "*failed to look up interface index");
 	dev1 = nm_test_device_new ("11:11:11:11:11:11");
+	g_test_expect_message ("NetworkManager", G_LOG_LEVEL_WARNING, "*failed to look up interface index");
 	dev2 = nm_test_device_new ("22:22:22:22:22:22");
+	g_test_expect_message ("NetworkManager", G_LOG_LEVEL_WARNING, "*failed to look up interface index");
 	dev3 = nm_test_device_new ("33:33:33:33:33:33");
+	g_test_expect_message ("NetworkManager", G_LOG_LEVEL_WARNING, "*failed to look up interface index");
 	dev4 = nm_test_device_new ("44:44:44:44:44:44");
 
 	g_assert (nm_config_get_no_auto_default_for_device (config, dev1));
