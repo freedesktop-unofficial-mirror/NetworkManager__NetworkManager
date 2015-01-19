@@ -2298,7 +2298,7 @@ ensure_master_active_connection (NMManager *self,
 		/* If the device is disconnected, find a compatible connection and
 		 * activate it on the device.
 		 */
-		if (master_state == NM_DEVICE_STATE_DISCONNECTED) {
+		if (master_state == NM_DEVICE_STATE_DISCONNECTED || !nm_device_is_real (master_device)) {
 			GSList *connections;
 
 			g_assert (master_connection == NULL);
@@ -2361,7 +2361,7 @@ ensure_master_active_connection (NMManager *self,
 			found_device = TRUE;
 			if (!nm_device_is_software (candidate)) {
 				master_state = nm_device_get_state (candidate);
-				if (master_state != NM_DEVICE_STATE_DISCONNECTED)
+				if (nm_device_is_real (candidate) && master_state != NM_DEVICE_STATE_DISCONNECTED)
 					continue;
 			}
 
