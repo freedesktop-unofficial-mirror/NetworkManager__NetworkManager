@@ -857,12 +857,16 @@ create_pppd_cmd_line (NMPPPManager *self,
 	const char *pppd_binary = NULL;
 	NMCmdLine *cmd;
 	gboolean ppp_debug;
+	guint32 mru, mtu, mxu = 0;
 
 	g_return_val_if_fail (setting != NULL, NULL);
 
 	pppd_binary = nm_utils_find_helper ("pppd", NULL, err);
 	if (!pppd_binary)
 		return NULL;
+
+	mru = nm_setting_ppp_get_mru (setting);
+	mtu = nm_setting_ppp_get_mru (setting);
 
 	/* Create pppd command line */
 	cmd = nm_cmd_line_new ();
@@ -906,6 +910,8 @@ create_pppd_cmd_line (NMPPPManager *self,
 			nm_cmd_line_add_string (cmd, "rp_pppoe_service");
 			nm_cmd_line_add_string (cmd, pppoe_service);
 		}
+
+		mxu = mru > mtu ? mru : mtu;
 	} else if (adsl) {
 		const gchar *protocol = nm_setting_adsl_get_protocol (adsl);
 
@@ -931,6 +937,8 @@ create_pppd_cmd_line (NMPPPManager *self,
 			nm_cmd_line_add_string (cmd, "plugin");
 			nm_cmd_line_add_string (cmd, "rp-pppoe.so");
 			nm_cmd_line_add_string (cmd, priv->parent_iface);
+
+			mxu = mru > mtu ? mru : mtu;
 		}
 
 		nm_cmd_line_add_string (cmd, "noipdefault");
@@ -939,6 +947,9 @@ create_pppd_cmd_line (NMPPPManager *self,
 		/* Don't send some random address as the local address */
 		nm_cmd_line_add_string (cmd, "noipdefault");
 	}
+
+	if (mxu && mxu > 1492)
+		nm_platform_link_set_mtu (nm_platform_link_get_ifindex (priv->parent_iface), mxu + 8);
 
 	if (nm_setting_ppp_get_baud (setting))
 		nm_cmd_line_add_int (cmd, nm_setting_ppp_get_baud (setting));
@@ -979,12 +990,12 @@ create_pppd_cmd_line (NMPPPManager *self,
 	 */
 	nm_cmd_line_add_string (cmd, "usepeerdns");
 
-	if (nm_setting_ppp_get_mru (setting)) {
+	if (mru) {
 		nm_cmd_line_add_string (cmd, "mru");
 		nm_cmd_line_add_int (cmd, nm_setting_ppp_get_mru (setting));
 	}
 
-	if (nm_setting_ppp_get_mtu (setting)) {
+	if (mtu) {
 		nm_cmd_line_add_string (cmd, "mtu");
 		nm_cmd_line_add_int (cmd, nm_setting_ppp_get_mtu (setting));
 	}
