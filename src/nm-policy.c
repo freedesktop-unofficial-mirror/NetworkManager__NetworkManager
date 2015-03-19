@@ -253,7 +253,7 @@ update_system_hostname (NMPolicy *policy, NMDevice *best4, NMDevice *best6)
 	 */
 
 	/* Try a persistent hostname first */
-	g_object_get (G_OBJECT (priv->manager), NM_MANAGER_HOSTNAME, &configured_hostname, NULL);
+	g_object_get (G_OBJECT (priv->settings), NM_SETTINGS_HOSTNAME, &configured_hostname, NULL);
 	if (configured_hostname && nm_utils_is_specific_hostname (configured_hostname)) {
 		_set_hostname (policy, configured_hostname, "from system configuration");
 		g_free (configured_hostname);
@@ -1796,7 +1796,6 @@ nm_policy_new (NMManager *manager, NMSettings *settings)
 	priv->resolver = g_resolver_get_default ();
 
 	_connect_manager_signal (policy, "state-changed", global_state_changed);
-	_connect_manager_signal (policy, "notify::" NM_MANAGER_HOSTNAME, hostname_changed);
 	_connect_manager_signal (policy, "notify::" NM_MANAGER_SLEEPING, sleeping_changed);
 	_connect_manager_signal (policy, "notify::" NM_MANAGER_NETWORKING_ENABLED, sleeping_changed);
 	_connect_manager_signal (policy, "device-added", device_added);
@@ -1804,6 +1803,7 @@ nm_policy_new (NMManager *manager, NMSettings *settings)
 	_connect_manager_signal (policy, NM_MANAGER_ACTIVE_CONNECTION_ADDED, active_connection_added);
 	_connect_manager_signal (policy, NM_MANAGER_ACTIVE_CONNECTION_REMOVED, active_connection_removed);
 
+	_connect_settings_signal (policy, "notify::" NM_SETTINGS_HOSTNAME, hostname_changed);
 	_connect_settings_signal (policy, NM_SETTINGS_SIGNAL_CONNECTION_ADDED, connection_added);
 	_connect_settings_signal (policy, NM_SETTINGS_SIGNAL_CONNECTION_UPDATED, connection_updated);
 	_connect_settings_signal (policy, NM_SETTINGS_SIGNAL_CONNECTION_UPDATED_BY_USER, connection_updated_by_user);

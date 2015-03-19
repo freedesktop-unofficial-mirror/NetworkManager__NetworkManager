@@ -53,7 +53,6 @@
 #define NM_MANAGER_DEVICES "devices"
 
 /* Not exported */
-#define NM_MANAGER_HOSTNAME "hostname"
 #define NM_MANAGER_SLEEPING "sleeping"
 
 /* Internal signals */

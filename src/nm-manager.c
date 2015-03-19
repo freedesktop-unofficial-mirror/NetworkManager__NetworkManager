@@ -182,7 +182,6 @@ typedef struct {
 	GSList *factories;
 
 	NMSettings *settings;
-	char *hostname;
 
 	RadioState radio_states[RFKILL_TYPE_MAX];
 	gboolean sleeping;
@@ -243,7 +242,6 @@ enum {
 	PROP_DEVICES,
 
 	/* Not exported */
-	PROP_HOSTNAME,
 	PROP_SLEEPING,
 
 	LAST_PROP
@@ -1232,17 +1230,7 @@ system_hostname_changed_cb (NMSettings *settings,
 	char *hostname;
 
 	hostname = nm_settings_get_hostname (priv->settings);
-	if (!hostname && !priv->hostname)
-		return;
-	if (hostname && priv->hostname && !strcmp (hostname, priv->hostname))
-		return;
-
-	g_free (priv->hostname);
-	priv->hostname = (hostname && strlen (hostname)) ? g_strdup (hostname) : NULL;
-	g_object_notify (G_OBJECT (self), NM_MANAGER_HOSTNAME);
-
-	nm_dhcp_manager_set_default_hostname (nm_dhcp_manager_get (), priv->hostname);
-
+	nm_dhcp_manager_set_default_hostname (nm_dhcp_manager_get (), hostname);
 	g_free (hostname);
 }
 
@@ -5017,9 +5005,6 @@ get_property (GObject *object, guint prop_id,
 		path = priv->activating_connection ? nm_active_connection_get_path (priv->activating_connection) : NULL;
 		g_value_set_boxed (value, path ? path : "/");
 		break;
-	case PROP_HOSTNAME:
-		g_value_set_string (value, priv->hostname);
-		break;
 	case PROP_SLEEPING:
 		g_value_set_boolean (value, priv->sleeping);
 		break;
@@ -5108,8 +5093,6 @@ dispose (GObject *object)
 		g_signal_handlers_disconnect_by_func (priv->connectivity, connectivity_changed, manager);
 		g_clear_object (&priv->connectivity);
 	}
-
-	g_free (priv->hostname);
 
 	if (priv->policy) {
 		g_signal_handlers_disconnect_by_func (priv->policy, policy_default_device_changed, manager);
@@ -5288,14 +5271,6 @@ nm_manager_class_init (NMManagerClass *manager_class)
 		                     DBUS_TYPE_G_OBJECT_PATH,
 		                     G_PARAM_READABLE |
 		                     G_PARAM_STATIC_STRINGS));
-
-	/* Hostname is not exported over D-Bus */
-	g_object_class_install_property
-		(object_class, PROP_HOSTNAME,
-		 g_param_spec_string (NM_MANAGER_HOSTNAME, "", "",
-		                      NULL,
-		                      G_PARAM_READABLE |
-		                      G_PARAM_STATIC_STRINGS));
 
 	/* Sleeping is not exported over D-Bus */
 	g_object_class_install_property

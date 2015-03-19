@@ -341,6 +341,11 @@ nm_dhcp_manager_set_default_hostname (NMDhcpManager *manager, const char *hostna
 {
 	NMDhcpManagerPrivate *priv = NM_DHCP_MANAGER_GET_PRIVATE (manager);
 
+	if (hostname && !*hostname)
+		hostname = NULL;
+	if (g_strcmp0 (hostname, priv->default_hostname) == 0)
+		return;
+
 	g_clear_pointer (&priv->default_hostname, g_free);
 
 	/* Never send 'localhost'-type names to the DHCP server */
