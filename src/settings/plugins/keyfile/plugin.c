@@ -630,54 +630,6 @@ plugin_get_hostname (SCPluginKeyfile *plugin)
 	return hostname;
 }
 
-static gboolean
-plugin_set_hostname (SCPluginKeyfile *plugin, const char *hostname)
-{
-	gboolean ret = FALSE;
-	SCPluginKeyfilePrivate *priv = SC_PLUGIN_KEYFILE_GET_PRIVATE (plugin);
-	GKeyFile *key_file = NULL;
-	GError *error = NULL;
-	char *data = NULL;
-	gsize len;
-
-	if (!priv->conf_file) {
-		g_set_error (&error, G_IO_ERROR, G_IO_ERROR_FAILED,
-		             "Error saving hostname: no config file");
-		goto out;
-	}
-
-	g_free (priv->hostname);
-	priv->hostname = g_strdup (hostname);
-
-	key_file = g_key_file_new ();
-	if (!parse_key_file_allow_none (priv, key_file, &error))
-		goto out;
-
-	g_key_file_set_string (key_file, "keyfile", "hostname", hostname);
-
-	data = g_key_file_to_data (key_file, &len, &error);
-	if (!data)
-		goto out;
-
-	if (!g_file_set_contents (priv->conf_file, data, len, &error)) {
-		g_prefix_error (&error, "Error saving hostname: ");
-		goto out;
-	}
-
-	ret = TRUE;
-
- out:
-	if (error) {
-		nm_log_warn (LOGD_SETTINGS, "keyfile: error setting hostname: %s", error->message);
-		g_error_free (error);
-	}
-	g_free (data);
-	if (key_file)
-		g_key_file_free (key_file);
-
-	return ret;
-}
-
 /* GObject */
 
 static void
@@ -700,8 +652,7 @@ get_property (GObject *object, guint prop_id,
 		g_value_set_string (value, KEYFILE_PLUGIN_INFO);
 		break;
 	case NM_SYSTEM_CONFIG_INTERFACE_PROP_CAPABILITIES:
-		g_value_set_uint (value, NM_SYSTEM_CONFIG_INTERFACE_CAP_MODIFY_CONNECTIONS | 
-						  NM_SYSTEM_CONFIG_INTERFACE_CAP_MODIFY_HOSTNAME);
+		g_value_set_uint (value, NM_SYSTEM_CONFIG_INTERFACE_CAP_MODIFY_CONNECTIONS);
 		break;
 	case NM_SYSTEM_CONFIG_INTERFACE_PROP_HOSTNAME:
 		g_value_set_string (value, SC_PLUGIN_KEYFILE_GET_PRIVATE (object)->hostname);
@@ -716,15 +667,7 @@ static void
 set_property (GObject *object, guint prop_id,
 			  const GValue *value, GParamSpec *pspec)
 {
-	const char *hostname;
-
 	switch (prop_id) {
-	case NM_SYSTEM_CONFIG_INTERFACE_PROP_HOSTNAME:
-		hostname = g_value_get_string (value);
-		if (hostname && strlen (hostname) < 1)
-			hostname = NULL;
-		plugin_set_hostname (SC_PLUGIN_KEYFILE (object), hostname);
-		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -818,9 +761,6 @@ nm_settings_keyfile_plugin_new (void)
 		priv = SC_PLUGIN_KEYFILE_GET_PRIVATE (singleton);
 
 		priv->conf_file = nm_config_data_get_config_main_file (nm_config_get_data (nm_config_get ()));
-
-		/* plugin_set_hostname() has to be called *after* priv->conf_file is set */
-		priv->hostname = plugin_get_hostname (singleton);
 	} else
 		g_object_ref (singleton);
 
