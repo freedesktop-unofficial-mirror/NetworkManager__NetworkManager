@@ -49,6 +49,7 @@
 #include "plugin.h"
 #include "nm-system-config-interface.h"
 #include "nm-config.h"
+#include "nm-settings.h"
 #include "nm-logging.h"
 #include "NetworkManagerUtils.h"
 
@@ -804,6 +805,54 @@ plugin_set_hostname (SCPluginIfcfg *plugin, const char *hostname)
 	return TRUE;
 }
 
+static char *
+read_sysconfig_hostname (void)
+{
+	shvarFile *network;
+	char *hostname;
+	gboolean ignore_localhost;
+
+	network = svOpenFile (SC_NETWORK_FILE, NULL);
+	if (!network) {
+		_LOGD ("Could not get hostname: failed to read " SC_NETWORK_FILE);
+		return NULL;
+	}
+
+	hostname = svGetValue (network, "HOSTNAME", FALSE);
+	ignore_localhost = svTrueValue (network, "NM_IGNORE_HOSTNAME_LOCALHOST", FALSE);
+	if (ignore_localhost) {
+		/* Ignore a default hostname ('localhost[6]' or 'localhost[6].localdomain[6]')
+		 * to preserve 'network' service behavior.
+		 */
+		if (hostname && !nm_utils_is_specific_hostname (hostname)) {
+			g_free (hostname);
+			hostname = NULL;
+		}
+	}
+
+	svCloseFile (network);
+	return hostname;
+
+}
+
+static gboolean
+clear_sysconfig_hostname (void)
+{
+	shvarFile *network;
+
+	_LOGD ("Removing hostname from " SC_NETWORK_FILE);
+
+	/* Remove "HOSTNAME" from SC_NETWORK_FILE, if present */
+	network = svOpenFile (SC_NETWORK_FILE, NULL);
+	if (network) {
+		svSetValue (network, "HOSTNAME", NULL, FALSE);
+		svWriteFile (network, 0644, NULL);
+		svCloseFile (network);
+	}
+
+	return TRUE;
+}
+
 static void
 hostname_maybe_changed (SCPluginIfcfg *plugin)
 {
@@ -1140,6 +1189,9 @@ nm_system_config_factory (void)
 			                                     DBUS_OBJECT_PATH,
 			                                     G_OBJECT (singleton));
 		_LOGI ("Acquired D-Bus service %s", DBUS_SERVICE_NAME);
+
+		nm_settings_register_sysconfig_hostname_read (read_sysconfig_hostname);
+		nm_settings_register_sysconfig_hostname_clear (clear_sysconfig_hostname);
 	} else
 		g_object_ref (singleton);
 

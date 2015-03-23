@@ -123,4 +123,7 @@ gint nm_settings_sort_connections (gconstpointer a, gconstpointer b);
 
 gboolean nm_settings_get_startup_complete (NMSettings *self);
 
+void nm_settings_register_sysconfig_hostname_read (char *(*fn) (void));
+void nm_settings_register_sysconfig_hostname_clear (int (*fn) (void));
+
 #endif  /* __NM_SETTINGS_H__ */
