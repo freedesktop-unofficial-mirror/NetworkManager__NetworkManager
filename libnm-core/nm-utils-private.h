@@ -23,8 +23,19 @@
 
 #include "nm-setting-private.h"
 
+typedef struct {
+	const char *name;
+	gboolean numeric;
+	gboolean ipv6_only;
+} DNSOptionDesc;
+
 gboolean    _nm_utils_string_slist_validate (GSList *list,
                                              const char **valid_values);
+
+gboolean    _nm_utils_dns_option_validate (const char *option, char **out_name,
+                                           long *out_value, gboolean ipv6,
+                                           const DNSOptionDesc *option_descs);
+int         _nm_utils_dns_option_find_idx (GPtrArray *array, const char *option);
 
 /* D-Bus transform funcs */
 
