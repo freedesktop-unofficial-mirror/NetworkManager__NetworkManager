@@ -1841,7 +1841,7 @@ write_ip4_setting (NMConnection *connection, shvarFile *ifcfg, GError **error)
 	gint32 j;
 	guint32 i, n, num;
 	gint64 route_metric;
-	GString *searches;
+	GString *searches, *options;
 	gboolean success = FALSE;
 	gboolean fake_ip4 = FALSE;
 	const char *method = NULL;
@@ -2012,6 +2012,19 @@ write_ip4_setting (NMConnection *connection, shvarFile *ifcfg, GError **error)
 		g_string_free (searches, TRUE);
 	} else
 		svSetValue (ifcfg, "DOMAIN", NULL, FALSE);
+
+	num = nm_setting_ip_config_get_num_dns_options (s_ip4);
+	if (num > 0) {
+		options = g_string_new (NULL);
+		for (i = 0; i < num; i++) {
+			if (i > 0)
+				g_string_append_c (options, ' ');
+			g_string_append (options, nm_setting_ip_config_get_dns_option (s_ip4, i));
+		}
+		svSetValue (ifcfg, "RES_OPTIONS", options->str, FALSE);
+		g_string_free (options, TRUE);
+	} else
+		svSetValue (ifcfg, "RES_OPTIONS", NULL, FALSE);
 
 	/* DEFROUTE; remember that it has the opposite meaning from never-default */
 	svSetValue (ifcfg, "DEFROUTE",
@@ -2291,7 +2304,7 @@ write_ip6_setting (NMConnection *connection, shvarFile *ifcfg, GError **error)
 	char *addr_key;
 	char *tmp;
 	guint32 i, num, num4;
-	GString *searches;
+	GString *searches, *options;
 	NMIPAddress *addr;
 	const char *dns;
 	gint64 route_metric;
@@ -2398,6 +2411,22 @@ write_ip6_setting (NMConnection *connection, shvarFile *ifcfg, GError **error)
 		svSetValue (ifcfg, "DOMAIN", searches->str, FALSE);
 		g_string_free (searches, TRUE);
 		g_free (ip4_domains);
+	}
+
+	/* Write out DNS options - 'RES_OPTIONS' key is shared for both IPv4 and IPv6 domains */
+	num = nm_setting_ip_config_get_num_dns_options (s_ip6);
+	if (num > 0) {
+		char *ip4_options;
+		ip4_options = svGetValue (ifcfg, "RES_OPTIONS", FALSE);
+		options = g_string_new (ip4_options);
+		for (i = 0; i < num; i++) {
+			if (options->len > 0)
+				g_string_append_c (options, ' ');
+			g_string_append (options, nm_setting_ip_config_get_dns_option (s_ip6, i));
+		}
+		svSetValue (ifcfg, "RES_OPTIONS", options->str, FALSE);
+		g_string_free (options, TRUE);
+		g_free (ip4_options);
 	}
 
 	/* handle IPV6_DEFROUTE */

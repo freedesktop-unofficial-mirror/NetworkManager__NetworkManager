@@ -1079,6 +1079,25 @@ make_ip4_setting (shvarFile *ifcfg,
 		g_free (value);
 	}
 
+	/* DNS options */
+	value = svGetValue (ifcfg, "RES_OPTIONS", FALSE);
+	if (value) {
+		char **options = NULL;
+
+		options = g_strsplit (value, " ", 0);
+		if (options) {
+			char **item;
+			for (item = options; *item; item++) {
+				if (strlen (*item)) {
+					if (!nm_setting_ip_config_add_dns_option (s_ip4, *item))
+						PARSE_WARNING ("duplicate DNS option '%s'", *item);
+				}
+			}
+			g_strfreev (options);
+		}
+		g_free (value);
+	}
+
 	/* Static routes  - route-<name> file */
 	route_path = utils_get_route_path (ifcfg->fileName);
 
@@ -4644,6 +4663,35 @@ check_dns_search_domains (shvarFile *ifcfg, NMSetting *s_ip4, NMSetting *s_ip6)
 	}
 }
 
+static void
+check_dns_options (shvarFile *ifcfg, NMSetting *s_ip4, NMSetting *s_ip6)
+{
+	if (!s_ip6)
+		return;
+
+	/* If there is no IPv4 config or it doesn't contain DNS options,
+	 * read RES_OPTIONS and put them into IPv6.
+	 */
+	if (!s_ip4 || nm_setting_ip_config_get_num_dns_options (NM_SETTING_IP_CONFIG (s_ip4)) == 0) {
+		/* DNS options */
+		char *value = svGetValue (ifcfg, "RES_OPTIONS", FALSE);
+		if (value) {
+			char **options = g_strsplit (value, " ", 0);
+			if (options) {
+				char **item;
+				for (item = options; *item; item++) {
+					if (strlen (*item)) {
+						if (!nm_setting_ip_config_add_dns_option (NM_SETTING_IP_CONFIG (s_ip6), *item))
+							PARSE_WARNING ("duplicate DNS option '%s'", *item);
+					}
+				}
+				g_strfreev (options);
+			}
+			g_free (value);
+		}
+	}
+}
+
 static NMConnection *
 connection_from_file_full (const char *filename,
                            const char *network_file,  /* for unit tests only */
@@ -4813,6 +4861,9 @@ connection_from_file_full (const char *filename,
 	 * DOMAIN and put the values into IPv6 config instead.
 	 */
 	check_dns_search_domains (parsed, s_ip4, s_ip6);
+
+	/* The same for RES_OPTIONS */
+	check_dns_options (parsed, s_ip4, s_ip6);
 
 	/* Bridge port? */
 	s_port = make_bridge_port_setting (parsed);
