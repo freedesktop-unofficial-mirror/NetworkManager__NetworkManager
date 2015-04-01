@@ -2086,6 +2086,7 @@ hostnamed_properties_changed (GDBusProxy *proxy,
 	if (g_strcmp0 (priv->hostname.value, hostname) != 0) {
 		nm_log_info (LOGD_SETTINGS, "hostname changed from '%s' to '%s'",
 		             priv->hostname.value, hostname);
+		g_free (priv->hostname.value);
 		priv->hostname.value = g_strdup (hostname);
 		g_object_notify (G_OBJECT (user_data), NM_SYSTEM_CONFIG_INTERFACE_HOSTNAME);
 	}
@@ -2149,21 +2150,25 @@ on_proxy_acquired (GObject *object, GAsyncResult *res, NMSettings *self)
 {
 	NMSettingsPrivate *priv = NM_SETTINGS_GET_PRIVATE (self);
 	GError *error = NULL;
+	char *owner;
 
 	priv->hostname.hostnamed_proxy = g_dbus_proxy_new_for_bus_finish (res, &error);
 
 	if (priv->hostname.hostnamed_proxy) {
-		nm_log_info (LOGD_SETTINGS, "hostnamed proxy acquired");
-		if (!g_dbus_proxy_get_name_owner (priv->hostname.hostnamed_proxy)) {
-			nm_log_info (LOGD_SETTINGS, "hostnamed proxy doesn't have a owner");
+		owner = g_dbus_proxy_get_name_owner (priv->hostname.hostnamed_proxy);
+		if (!owner) {
+			nm_log_info (LOGD_SETTINGS, "hostname: hostnamed not used");
 			g_clear_object (&priv->hostname.hostnamed_proxy);
 		} else {
+			nm_log_info (LOGD_SETTINGS, "hostname: use hostnamed");
 			g_signal_connect (priv->hostname.hostnamed_proxy, "g-properties-changed",
 			                  G_CALLBACK (hostnamed_properties_changed), self);
 			hostnamed_properties_changed (priv->hostname.hostnamed_proxy, NULL, NULL, self);
+			g_free (owner);
 		}
 	} else {
-		nm_log_warn (LOGD_SETTINGS, "Failed to acquire hostnamed proxy: %s", error->message);
+		nm_log_info (LOGD_SETTINGS, "hostname: hostnamed not used as proxy creation failed with: %s",
+		             error->message);
 		g_clear_error (&error);
 	}
 
