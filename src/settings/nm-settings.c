@@ -612,15 +612,15 @@ char *
 nm_settings_get_hostname (NMSettings *self)
 {
 	NMSettingsPrivate *priv = NM_SETTINGS_GET_PRIVATE (self);
-#if !defined(HOSTNAME_PERSIST_IFNET)
 	char *hostname = NULL;
-#endif
 
-	if (priv->hostname.hostnamed_proxy)
-		return g_strdup (priv->hostname.value);
+	if (priv->hostname.hostnamed_proxy) {
+		hostname = g_strdup (priv->hostname.value);
+		goto out;
+	}
 
 #if defined(HOSTNAME_PERSIST_IFNET)
-	return read_hostname_ifnet (priv->hostname.file);
+	hostname = read_hostname_ifnet (priv->hostname.file);
 #else
 
 #if defined(HOSTNAME_PERSIST_SUSE)
@@ -633,8 +633,15 @@ nm_settings_get_hostname (NMSettings *self)
 	if (!hostname && sysconfig_hostname_read)
 		hostname = sysconfig_hostname_read ();
 
-	return hostname;
 #endif /* HOSTNAME_PERSIST_IFNET */
+
+out:
+	if (hostname && !hostname[0]) {
+		g_free (hostname);
+		hostname = NULL;
+	}
+
+	return hostname;
 }
 
 static gboolean
