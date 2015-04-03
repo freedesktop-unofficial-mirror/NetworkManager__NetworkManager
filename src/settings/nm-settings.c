@@ -560,9 +560,8 @@ read_hostname_ifnet (const char *path)
 		g_strstrip (all_lines[i]);
 		if (all_lines[i][0] == '#' || all_lines[i][0] == '\0')
 			continue;
-		if (g_str_has_prefix (all_lines[i], "hostname")) {
-			tmp = strstr (all_lines[i], "=");
-			tmp++;
+		if (g_str_has_prefix (all_lines[i], "hostname=")) {
+			tmp = &all_lines[i][STRLEN ("hostname=")];
 			result = g_shell_unquote (tmp, NULL);
 			break;
 		}
@@ -590,12 +589,15 @@ hostname_is_dynamic (void)
 	pattern_len = strlen (pattern);
 
 	while (g_io_channel_read_line (channel, &str, NULL, NULL, NULL) != G_IO_STATUS_EOF) {
-		if (!strncmp (str, pattern, pattern_len)) {
-			if (!strncmp (str + pattern_len, "\"yes\"", 5))
+		if (str) {
+			g_strstrip (str);
+			if (!strcmp (str, "DHCLIENT_SET_HOSTNAME=\"yes\"")) {
 				dynamic = TRUE;
-			break;
+				g_free (str);
+				break;
+			}
+			g_free (str);
 		}
-		g_free (str);
 	}
 
 	g_io_channel_shutdown (channel, FALSE, NULL);
