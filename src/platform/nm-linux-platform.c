@@ -114,6 +114,9 @@
 #define warning(...)    _LOG (LOGL_WARN , _LOG_DOMAIN, NULL, __VA_ARGS__)
 #define error(...)      _LOG (LOGL_ERR  , _LOG_DOMAIN, NULL, __VA_ARGS__)
 
+/* for now, only add new functions, use them in a second step. */
+NM_PRAGMA_WARNING_DISABLE ("-Wunused")
+
 /******************************************************************/
 
 #define return_type(t, name) \
@@ -527,20 +530,134 @@ udev_detect_link_type_from_device (GUdevDevice *udev_device, const char *ifname,
 }
 
 /******************************************************************
+ * _pf_coerce
+ ******************************************************************/
+
+static gboolean
+_pf_coerce_master_connected_needs_toggle (const NMPObject *master, const NMPCache *cache)
+{
+	NMPCacheId cache_id;
+	const NMPlatformLink *const *links;
+	gboolean is_lower_up = FALSE;
+
+	if (   NMP_OBJECT_GET_TYPE (master) != OBJECT_TYPE_LINK
+	    || !NM_IN_SET (master->link.type, NM_LINK_TYPE_BRIDGE, NM_LINK_TYPE_BOND))
+		return FALSE;
+
+	/* if native IFF_LOWER_UP is down, link.connected must also be down
+	 * regardless of the slaves. */
+	if (!master->_link.netlink.connected_native)
+		return !master->link.connected;
+
+	links = (const NMPlatformLink *const *) nmp_cache_lookup_multi (cache, nmp_cache_id_init_links (&cache_id, FALSE), NULL);
+	if (links) {
+		for (; *links; links++) {
+			const NMPlatformLink *link = *links;
+
+			nm_assert (NMP_OBJECT_GET_TYPE (NMP_OBJECT_UP_CAST ((NMPlatformObject *) link)) == OBJECT_TYPE_LINK);
+
+			if (   link->master == master->link.ifindex
+			    && link->connected) {
+				is_lower_up = TRUE;
+				break;
+			}
+		}
+	}
+	return master->link.connected != is_lower_up;
+}
+
+static const NMPObject *
+_pf_coerce_master_connected_needs_toggle_find_master (const NMPObject *slave, const NMPCache *cache)
+{
+	const NMPObject *master;
+
+	/* when @slave changes, find whether it has/had a master and
+	 * whether that master needs toggeling of the connected flag. */
+
+	if (   NMP_OBJECT_GET_TYPE (slave) != OBJECT_TYPE_LINK
+	    || slave->link.master <= 0)
+		return NULL;
+
+	master = nmp_cache_lookup_link (cache, slave->link.master);
+	if (   master
+	    && _pf_coerce_master_connected_needs_toggle (master, cache))
+		return master;
+
+	return NULL;
+}
+
+static void
+_pf_coerce_link_udev (NMPObject *obj, const NMPCache *cache)
+{
+	const NMPClass *klass;
+	const NMPObject *obj_cached;
+	GUdevDevice *udev_device;
+
+	klass = NMP_OBJECT_GET_CLASS (obj);
+	if (klass->type != OBJECT_TYPE_LINK)
+		return;
+
+	if (obj->_link.udev.device)
+		return;
+
+	obj_cached = nmp_cache_lookup_obj (cache, obj);
+	if (!obj_cached)
+		return;
+	if (!(udev_device = obj_cached->_link.udev.device))
+		return;
+
+	if (obj->_link.netlink.link_type_unknown_udev) {
+		obj->link.type = udev_detect_link_type_from_device (udev_device, obj->link.name, obj->_link.netlink.arptype, &obj->link.type_name);
+		if (obj->link.type == NM_LINK_TYPE_UNKNOWN_UDEV)
+			obj->link.type = NM_LINK_TYPE_UNKNOWN;
+		else
+			obj->_link.netlink.link_type_unknown_udev = FALSE;
+	}
+
+	obj->link.driver = udev_get_driver (udev_device, obj->link.ifindex);
+	if (!obj->link.driver)
+		obj->link.driver = obj->_link.netlink.rtnl_link_type;
+	if (!obj->link.driver)
+		obj->link.driver = ethtool_get_driver (obj->link.name);
+	if (!obj->link.driver)
+		obj->link.driver = "unknown";
+	obj->link.udi = g_udev_device_get_sysfs_path (udev_device);
+
+	obj->_link.udev.device = g_object_ref (udev_device);
+}
+
+/******************************************************************
  * NMPlatform types and functions
  ******************************************************************/
 
+typedef enum {
+	DELAYED_ACTION_TYPE_REFRESH_LINK,
+	DELAYED_ACTION_TYPE_REFRESH_ADDRS_FOR_IFINDEX,
+	DELAYED_ACTION_TYPE_REFRESH_ROUTES_FOR_IFINDEX,
+	DELAYED_ACTION_TYPE_MASTER_CONNECTED,
+} DelayedActionType;
+
 typedef struct {
+	DelayedActionType action_type;
+	gpointer user_data;
+} DelayedActionData;
+
+typedef struct {
+	gboolean disposing;
+
 	struct nl_sock *nlh;
 	struct nl_sock *nlh_event;
 	struct nl_cache *link_cache;
 	struct nl_cache *address_cache;
 	struct nl_cache *route_cache;
+	NMPCache *cache;
 	GIOChannel *event_channel;
 	guint event_id;
 
 	GUdevClient *udev_client;
 	GHashTable *udev_devices;
+
+	GArray *delayed_actions;
 
 	GHashTable *wifi_data;
 
@@ -711,6 +828,75 @@ get_kernel_object (struct nl_sock *sock, struct nl_object *needle)
 	default:
 		g_return_val_if_reached (NULL);
 		return NULL;
+	}
+}
+
+static NMPObject *
+_pf_main_get_kernel (NMPlatform *platform, struct nl_sock *sock, const NMPObject *needle)
+{
+	auto_nl_object struct nl_object *nlo = NULL;
+	struct nl_object *nlo_needle;
+	NMPObject *obj;
+	int nle;
+	struct nl_cache *cache;
+
+	switch (NMP_OBJECT_GET_CLASS (needle)->type) {
+	case OBJECT_TYPE_LINK:
+		nle = rtnl_link_get_kernel (sock, needle->link.ifindex,
+		                            needle->link.name[0] ? needle->link.name : NULL,
+		                            (struct rtnl_link **) &nlo);
+		switch (nle) {
+		case -NLE_SUCCESS:
+			_support_user_ipv6ll_detect ((struct rtnl_link *) nlo);
+			obj = nmp_object_from_nl (nlo, FALSE);
+			debug ("get_kernel_object(link #%d, %s) succeeds: %s",
+			       needle->link.ifindex, needle->link.name,
+			       nmp_object_to_string (obj));
+			return obj;
+		case -NLE_NODEV:
+			debug ("get_kernel_object(link #%d, %s) fails: NO DEVICE",
+			       needle->link.ifindex, needle->link.name);
+			return NULL;
+		default:
+			error ("get_kernel_object(link #%d, %s) fails: %s (%d)",
+			       needle->link.ifindex, needle->link.name,
+			       nl_geterror (nle), nle);
+			return NULL;
+		}
+	case OBJECT_TYPE_IP4_ADDRESS:
+	case OBJECT_TYPE_IP6_ADDRESS:
+	case OBJECT_TYPE_IP4_ROUTE:
+	case OBJECT_TYPE_IP6_ROUTE:
+		/* FIXME: every time we refresh *one* object, we request an
+		 * entire dump. */
+		nle = nl_cache_alloc_and_fill (nl_cache_ops_lookup (NMP_OBJECT_GET_CLASS (needle)->nl_type),
+		                               sock, &cache);
+		if (nle) {
+			error ("get_kernel_object(%s, %s) failed: %s (%d)",
+			       NMP_OBJECT_GET_CLASS (needle)->nl_type,
+			       nmp_object_to_string (needle),
+			       nl_geterror (nle), nle);
+			return NULL;
+		}
+
+		nlo_needle = nmp_object_to_nl (platform, needle, TRUE);
+		nlo = nl_cache_search (cache, nlo_needle);
+		nl_object_put (nlo_needle);
+		nl_cache_free (cache);
+
+		if (!nlo) {
+			debug ("get_kernel_object(%s, %s) had no results",
+			       NMP_OBJECT_GET_CLASS (needle)->nl_type,
+			       nmp_object_to_string (needle));
+			return NULL;
+		}
+		obj = nmp_object_from_nl (nlo, FALSE);
+		debug ("get_kernel_object(%s, %s)",
+		       NMP_OBJECT_GET_CLASS (obj)->nl_type,
+		       nmp_object_to_string (obj));
+		return obj;
+	default:
+		g_return_val_if_reached (NULL);
 	}
 }
 
@@ -1993,6 +2179,203 @@ announce_object (NMPlatform *platform, const struct nl_object *object, NMPlatfor
 	}
 }
 
+static void
+_pf_main_object_announce (NMPlatform *platform, const NMPObject *obj, gboolean was_visible, NMPCacheOpsType change_type, NMPlatformReason reason)
+{
+	gboolean is_visible;
+
+	switch (change_type) {
+	case NMP_CACHE_OPS_ADDED:
+		if (!nmp_object_is_visible (obj))
+			return;
+		break;
+	case NMP_CACHE_OPS_UPDATED:
+		is_visible = nmp_object_is_visible (obj);
+		if (!was_visible && is_visible)
+			change_type = NMP_CACHE_OPS_ADDED;
+		else if (was_visible && !is_visible)
+			change_type = NMP_CACHE_OPS_REMOVED;
+		else if (!is_visible)
+			return;
+		break;
+	case NMP_CACHE_OPS_REMOVED:
+		if (!was_visible)
+			return;
+		break;
+	default:
+		g_assert_not_reached ();
+	}
+
+	nm_assert (NM_IN_SET ((NMPlatformSignalChangeType) change_type, NM_PLATFORM_SIGNAL_ADDED, NM_PLATFORM_SIGNAL_CHANGED, NM_PLATFORM_SIGNAL_REMOVED));
+
+	g_signal_emit_by_name (platform, NMP_OBJECT_GET_CLASS (obj)->signal_type, obj->object.ifindex, &obj->object, (NMPlatformSignalChangeType) change_type, reason);
+}
+
+static void _pf_main_cache_update_handle (NMPlatform *platform, NMPObject *obj, NMPCacheOpsType cache_op, gboolean was_visible, NMPlatformReason reason);
+static void _pf_main_cache_update (NMPlatform *platform, NMPObject *obj, NMPObjectAspects obj_aspect, NMPlatformReason reason);
+static void _pf_main_refresh_object (NMPlatform *platform, const NMPObject *obj_needle, NMPlatformReason reason, gboolean handle_all_delayed_actions, NMPObject **out_obj_cache);
+
+static void
+_pf_delayed_action_handle_MASTER_CONNECTED (NMPlatform *platform, int master_ifindex, gboolean cleanup_only)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	const NMPObject *master;
+	auto_nmp_obj NMPObject *obj_clone = NULL;
+
+	if (cleanup_only)
+		return;
+
+	master = nmp_cache_lookup_link (priv->cache, master_ifindex);
+	if (!master)
+		return;
+	if (!_pf_coerce_master_connected_needs_toggle (master, priv->cache))
+		return;
+
+	obj_clone = nmp_object_clone (master, FALSE);
+	obj_clone->link.connected = !obj_clone->link.connected;
+
+	_pf_main_cache_update (platform, obj_clone, NMP_OBJECT_ASPECT_PUBLIC | NMP_OBJECT_ASPECT_NETLINK, NM_PLATFORM_REASON_INTERNAL);
+}
+
+static void
+_pf_delayed_action_handle_REFRESH_LINK (NMPlatform *platform, int ifindex, gboolean cleanup_only)
+{
+	NMPObject needle;
+
+	if (cleanup_only)
+		return;
+	if (ifindex <= 0)
+		return;
+	_pf_main_refresh_object (platform, nmp_object_stackinit_id_link (&needle, ifindex), NM_PLATFORM_REASON_INTERNAL, FALSE, NULL);
+}
+
+static const DelayedActionData *
+_pf_delayed_action_find_first_of_type (GArray *array, DelayedActionType action_type,  guint *out_idx)
+{
+	guint i;
+
+	for (i = 0; i < array->len; i++) {
+		const DelayedActionData *d = &g_array_index (array, DelayedActionData, i);
+
+		if (d->action_type == action_type) {
+			if (out_idx)
+				*out_idx = i;
+			return d;
+		}
+	}
+	return NULL;
+}
+
+static void
+_pf_delayed_action_prune_identical (GArray *array, const DelayedActionData *data, GDestroyNotify release_user_data)
+{
+	DelayedActionData d0;
+	guint i;
+
+	if (array->len <= 1)
+		return;
+
+	d0 = *data;
+	for (i = 1; i < array->len; i++) {
+		const DelayedActionData *d = &g_array_index (array, DelayedActionData, i);
+
+		if (   d0.action_type == d->action_type
+		    && d0.user_data == d->user_data) {
+			if (release_user_data)
+				release_user_data (d->user_data);
+			g_array_remove_index (array, i--);
+		}
+	}
+}
+
+static int
+_pf_delayed_action_handle (NMPlatform *platform)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	const DelayedActionData *data;
+	int ifindex;
+
+	/* first process DELAYED_ACTION_TYPE_MASTER_CONNECTED actions.
+	 * They are entirely cache-internal and any inconsistency should
+	 * be fixed right away. */
+	if ((data = _pf_delayed_action_find_first_of_type (priv->delayed_actions, DELAYED_ACTION_TYPE_MASTER_CONNECTED, NULL))) {
+		ifindex = GPOINTER_TO_INT (data->user_data);
+		_pf_delayed_action_prune_identical (priv->delayed_actions, data, NULL);
+		_pf_delayed_action_handle_MASTER_CONNECTED (platform, ifindex, priv->disposing);
+		return 1;
+	}
+
+	if (priv->delayed_actions->len == 0)
+		return 0;
+
+	data = &g_array_index (priv->delayed_actions, DelayedActionData, 0);
+
+	switch (data->action_type) {
+	case DELAYED_ACTION_TYPE_REFRESH_LINK:
+		ifindex = GPOINTER_TO_INT (data->user_data);
+		_pf_delayed_action_prune_identical (priv->delayed_actions, data, NULL);
+		_pf_delayed_action_handle_REFRESH_LINK (platform, GPOINTER_TO_INT (data->user_data), priv->disposing);
+		break;
+	default:
+		g_assert_not_reached ();
+	}
+
+	return 1;
+}
+
+static void
+_pf_delayed_action_schedule (NMPlatform *platform, DelayedActionType action_type, gpointer user_data)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	DelayedActionData data = {
+		.action_type = action_type,
+		.user_data = user_data,
+	};
+
+	g_array_append_val (priv->delayed_actions, data);
+}
+
+static void
+_pf_main_cache_update_handle (NMPlatform *platform, NMPObject *obj, NMPCacheOpsType cache_op, gboolean was_visible, NMPlatformReason reason)
+{
+	NMLinuxPlatformPrivate *priv;
+	const NMPObject *coerce_master_connected;
+
+	if (cache_op == NMP_CACHE_OPS_UNCHANGED)
+		return;
+
+	priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+
+	nm_assert (obj);
+	nm_assert (cache_op == NMP_CACHE_OPS_REMOVED || obj == nmp_cache_lookup_obj (priv->cache, obj));
+	nm_assert (cache_op != NMP_CACHE_OPS_REMOVED || obj != nmp_cache_lookup_obj (priv->cache, obj));
+
+	_pf_main_object_announce (platform, obj, was_visible, cache_op, reason);
+
+	/* after an update, see whether other changes are needed. */
+	coerce_master_connected = _pf_coerce_master_connected_needs_toggle_find_master (obj, priv->cache);
+	if (coerce_master_connected) {
+		/* The change caused a reset of the connected flag of @coerce_master_connected. Schedule it for later.*/
+		_pf_delayed_action_schedule (platform, DELAYED_ACTION_TYPE_MASTER_CONNECTED, GINT_TO_POINTER (coerce_master_connected->link.ifindex));
+	}
+}
+
+static void
+_pf_main_cache_update (NMPlatform *platform, NMPObject *obj, NMPObjectAspects obj_aspect, NMPlatformReason reason)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	auto_nmp_obj NMPObject *obj_cache = NULL;
+	NMPCacheOpsType cache_op;
+	gboolean was_visible;
+
+	nm_assert (obj && obj == nmp_cache_lookup_obj (priv->cache, obj));
+
+	cache_op = nmp_cache_update (priv->cache, obj, obj_aspect, &obj_cache, &was_visible);
+
+	_pf_main_cache_update_handle (platform, obj_cache, cache_op, was_visible, reason);
+}
+
+
 static struct nl_object * build_rtnl_link (int ifindex, const char *name, NMLinkType type);
 
 static gboolean
@@ -2062,6 +2445,67 @@ refresh_object (NMPlatform *platform, struct nl_object *object, gboolean removed
 	return TRUE;
 }
 
+static void
+_pf_main_refresh_object (NMPlatform *platform, const NMPObject *obj_needle, NMPlatformReason reason, gboolean handle_all_delayed_actions, NMPObject **out_obj_cache)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	auto_nmp_obj NMPObject *obj_kernel = NULL;
+	NMPObject *obj_cache = NULL;
+	NMPCacheOpsType cache_op;
+	gboolean was_visible;
+	int master_id = 0;
+
+	obj_kernel = _pf_main_get_kernel (platform, priv->nlh, obj_needle);
+
+	if (NMP_OBJECT_GET_TYPE (obj_kernel) == OBJECT_TYPE_LINK)
+		master_id = obj_kernel->link.master;
+	else if (NMP_OBJECT_GET_TYPE (obj_needle) == OBJECT_TYPE_LINK)
+		master_id = obj_needle->link.master;
+
+	if (master_id > 0)
+		_pf_delayed_action_schedule (platform, DELAYED_ACTION_TYPE_REFRESH_LINK, GINT_TO_POINTER (master_id));
+
+	if (!obj_kernel) {
+		if (NMP_OBJECT_GET_CLASS (obj_needle)->has_other_aspects) {
+			NMPObject obj_id;
+
+			/* only remove the libnl *aspect* from the cache by cloning
+			 * a shallog @obj_ib instance with NMP_OBJECT_ASPECT_NETLINK unset. */
+			nmp_object_stackinit_id (&obj_id, obj_needle);
+			nm_assert (!nmp_object_is_alive (&obj_id));
+
+			/* @obj_id has only the id parts set. We only clear the NETLINK aspect, otherwise
+			 * we also would clear properties such as 'name', which are useful during to_string(). */
+			cache_op = nmp_cache_update (priv->cache, &obj_id, NMP_OBJECT_ASPECT_NETLINK, &obj_cache, &was_visible);
+		} else
+			cache_op = nmp_cache_remove (priv->cache, obj_needle, &obj_cache, &was_visible);
+	} else {
+
+		if (_pf_coerce_master_connected_needs_toggle (obj_kernel, priv->cache))
+			obj_kernel->link.connected = !obj_kernel->link.connected;
+		_pf_coerce_link_udev (obj_kernel, priv->cache);
+
+		cache_op = nmp_cache_update (priv->cache, obj_kernel, NMP_OBJECT_ASPECT_PUBLIC | NMP_OBJECT_ASPECT_NETLINK, &obj_cache, &was_visible);
+	}
+
+	if (   obj_cache
+	    && NMP_OBJECT_GET_TYPE (obj_cache) == OBJECT_TYPE_LINK
+	    && obj_cache->link.master > 0)
+		_pf_delayed_action_schedule (platform, DELAYED_ACTION_TYPE_REFRESH_LINK, GINT_TO_POINTER (obj_cache->link.master));
+
+	_pf_main_cache_update_handle (platform, obj_cache, cache_op, was_visible, reason);
+
+	if (out_obj_cache)
+		*out_obj_cache = obj_cache;
+	else
+		nmp_object_put (obj_cache);
+
+	if (handle_all_delayed_actions) {
+		while (priv->delayed_actions->len > 0)
+			_pf_delayed_action_handle (platform);
+	}
+}
+
 /* Decreases the reference count if @obj for convenience */
 static gboolean
 add_object (NMPlatform *platform, struct nl_object *obj)
@@ -2100,6 +2544,29 @@ add_object (NMPlatform *platform, struct nl_object *obj)
 	}
 
 	return refresh_object (platform, object, FALSE, NM_PLATFORM_REASON_INTERNAL);
+}
+
+static gboolean
+_pf_main_kernel_add (NMPlatform *platform, const struct nl_object *nlo)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	int nle;
+
+	g_return_val_if_fail (nlo, FALSE);
+
+	nle = add_kernel_object (priv->nlh, (struct nl_object *) nlo);
+
+	/* NLE_EXIST is considered equivalent to success to avoid race conditions. You
+	 * never know when something sends an identical object just before
+	 * NetworkManager.
+	 */
+	switch (nle) {
+	case -NLE_SUCCESS:
+	case -NLE_EXIST:
+		return NLE_SUCCESS;
+	default:
+		return nle;
+	}
 }
 
 /* Decreases the reference count if @obj for convenience */
@@ -2166,6 +2633,58 @@ delete_object (NMPlatform *platform, struct nl_object *object, gboolean do_refre
 out:
 	nl_object_put (object);
 	return result;
+}
+
+static int
+_pf_main_kernel_delete (NMPlatform *platform, ObjectType object_type, struct nl_object *object)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	int nle;
+	gboolean result = FALSE;
+
+	switch (object_type) {
+	case OBJECT_TYPE_LINK:
+		nle = rtnl_link_delete (priv->nlh, (struct rtnl_link *) object);
+		break;
+	case OBJECT_TYPE_IP4_ADDRESS:
+	case OBJECT_TYPE_IP6_ADDRESS:
+		nle = rtnl_addr_delete (priv->nlh, (struct rtnl_addr *) object, 0);
+		break;
+	case OBJECT_TYPE_IP4_ROUTE:
+	case OBJECT_TYPE_IP6_ROUTE:
+		nle = rtnl_route_delete (priv->nlh, (struct rtnl_route *) object, 0);
+		break;
+	default:
+		g_assert_not_reached ();
+	}
+
+	switch (nle) {
+	case -NLE_SUCCESS:
+		return NLE_SUCCESS;
+	case -NLE_OBJ_NOTFOUND:
+		debug("kernel_delete: failed with \"%s\" (%d), meaning the object was already removed",
+		      nl_geterror (nle), nle);
+		return NLE_SUCCESS;
+	case -NLE_FAILURE:
+		if (object_type == OBJECT_TYPE_IP6_ADDRESS) {
+			/* On RHEL7 kernel, deleting a non existing address fails with ENXIO (which libnl maps to NLE_FAILURE) */
+			debug("kernel_delete: deleting address failed with \"%s\" (%d), meaning the address was already removed",
+			      nl_geterror (nle), nle);
+			return NLE_SUCCESS;
+		}
+		break;
+	case -NLE_NOADDR:
+		if (object_type == OBJECT_TYPE_IP4_ADDRESS || object_type == OBJECT_TYPE_IP6_ADDRESS) {
+			debug("kernel_delete: deleting address failed with \"%s\" (%d), meaning the address was already removed",
+			      nl_geterror (nle), nle);
+			return NLE_SUCCESS;
+		}
+		break;
+	default:
+		break;
+	}
+	debug ("kernel_delete: error deleting %s: %s (%d)", to_string_object (platform, object), nl_geterror (nle), nle);
+	return nle;
 }
 
 static void
@@ -2608,6 +3127,74 @@ _nmp_vt_cmd_plobj_to_nl_link (NMPlatform *platform, const NMPlatformObject *_obj
 	return build_rtnl_link (obj->ifindex,
 	                        obj->name[0] ? obj->name : NULL,
 	                        obj->type);
+}
+
+static gboolean
+_pf_main_add_link (NMPlatform *platform, const char *name, const struct rtnl_link *nlo)
+{
+	NMPObject obj_needle;
+	auto_nmp_obj NMPObject *obj_cache = NULL;
+	int nle;
+
+	nle = _pf_main_kernel_add (platform, (const struct nl_object *) nlo);
+	if (nle < 0) {
+		error ("link: failure adding link '%s': %s", name, nl_geterror (nle));
+		return FALSE;
+	}
+
+	debug ("link: success adding link '%s'", name);
+
+	nmp_object_stackinit_id_link (&obj_needle, 0);
+	g_strlcpy (obj_needle.link.name, name, sizeof (obj_needle.link.name));
+
+	_pf_main_refresh_object (platform, &obj_needle, NM_PLATFORM_REASON_INTERNAL, TRUE, &obj_cache);
+	debug ("link: refreshed %s", nmp_object_to_string (obj_cache));
+	return obj_cache != NULL;
+}
+
+static gboolean
+_pf_main_add_addrroute (NMPlatform *platform, const NMPObject *obj_id, const struct nl_object *nlo)
+{
+	auto_nmp_obj NMPObject *obj_cache = NULL;
+	int nle;
+
+	nm_assert (NM_IN_SET (NMP_OBJECT_GET_TYPE (obj_id),
+	                      OBJECT_TYPE_IP4_ADDRESS, OBJECT_TYPE_IP6_ADDRESS,
+	                      OBJECT_TYPE_IP4_ROUTE, OBJECT_TYPE_IP6_ROUTE));
+
+	nle = _pf_main_kernel_add (platform, (const struct nl_object *) nlo);
+	if (nle < 0) {
+		error ("%s: failure adding route: %s", NMP_OBJECT_GET_CLASS (obj_id)->nl_type, nl_geterror (nle));
+		return FALSE;
+	}
+
+	debug ("%s: success adding route", NMP_OBJECT_GET_CLASS (obj_id)->nl_type);
+
+	_pf_main_refresh_object (platform, obj_id, NM_PLATFORM_REASON_INTERNAL, TRUE, &obj_cache);
+	debug ("%s: refreshed %s", NMP_OBJECT_GET_CLASS (obj_id)->nl_type, nmp_object_to_string (obj_cache));
+	return obj_cache != NULL;
+}
+
+
+static gboolean
+_pf_main_delete_object (NMPlatform *platform, const NMPObject *obj_id)
+{
+	NMPObject obj_needle;
+	auto_nmp_obj NMPObject *obj_cache = NULL;
+	auto_nl_object struct nl_object *nlo = NULL;
+	int nle;
+
+	nlo = nmp_object_to_nl (platform, obj_id, FALSE);
+
+	nle = _pf_main_kernel_delete (platform, NMP_OBJECT_GET_TYPE (obj_id), nlo);
+	if (nle < 0)
+		error ("%s: failure deleting '%s': %s", NMP_OBJECT_GET_CLASS (obj_id)->nl_type, nmp_object_to_string (obj_id), nl_geterror (nle));
+	else
+		debug ("%s: success deleting '%s'", NMP_OBJECT_GET_CLASS (obj_id)->nl_type, nmp_object_to_string (obj_id));
+
+	_pf_main_refresh_object (platform, obj_id, NM_PLATFORM_REASON_INTERNAL, TRUE, &obj_cache);
+	debug ("%s: refreshed %s", NMP_OBJECT_GET_CLASS (obj_id)->nl_type, nmp_object_to_string (obj_cache));
+	return obj_cache != NULL;
 }
 
 static gboolean
@@ -4876,6 +5463,10 @@ handle_udev_event (GUdevClient *client,
 static void
 nm_linux_platform_init (NMLinuxPlatform *platform)
 {
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+
+	priv->cache = nmp_cache_new ();
+	priv->delayed_actions = g_array_new (FALSE, FALSE, sizeof (DelayedActionData));
 }
 
 static void
@@ -4977,6 +5568,14 @@ constructed (GObject *_object)
 static void
 dispose (GObject *object)
 {
+	NMPlatform *platform = NM_PLATFORM (object);
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+
+	priv->disposing = TRUE;
+
+	while (priv->delayed_actions->len > 0)
+		_pf_delayed_action_handle (platform);
+
 	G_OBJECT_CLASS (nm_linux_platform_parent_class)->dispose (object);
 }
 
@@ -4984,6 +5583,10 @@ static void
 nm_linux_platform_finalize (GObject *object)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (object);
+
+	nmp_cache_free (priv->cache);
+
+	g_array_unref (priv->delayed_actions);
 
 	/* Free netlink resources */
 	g_source_remove (priv->event_id);
@@ -5116,3 +5719,4 @@ nm_linux_platform_class_init (NMLinuxPlatformClass *klass)
 	platform_class->check_support_kernel_extended_ifa_flags = check_support_kernel_extended_ifa_flags;
 	platform_class->check_support_user_ipv6ll = check_support_user_ipv6ll;
 }
+
