@@ -38,7 +38,6 @@ check-local: check_ifnet
 endif
 
 EXTRA_DIST = \
-	hostname \
 	net \
 	net.all \
 	nm-system-settings.conf \
