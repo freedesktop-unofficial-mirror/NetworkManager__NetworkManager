@@ -177,14 +177,11 @@ nm_device_macvlan_class_init (NMDeviceMacvlanClass *klass)
 static NMDevice *
 new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 {
-	if (plink->type == NM_LINK_TYPE_MACVLAN || plink->type == NM_LINK_TYPE_MACVTAP) {
-		return (NMDevice *) g_object_new (NM_TYPE_DEVICE_MACVLAN,
-		                                  NM_DEVICE_PLATFORM_DEVICE, plink,
-		                                  NM_DEVICE_TYPE_DESC, "Macvlan",
-		                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_GENERIC,
-		                                  NULL);
-	}
-	return NULL;
+	return (NMDevice *) g_object_new (NM_TYPE_DEVICE_MACVLAN,
+	                                  NM_DEVICE_PLATFORM_DEVICE, plink,
+	                                  NM_DEVICE_TYPE_DESC, "Macvlan",
+	                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_GENERIC,
+	                                  NULL);
 }
 
 NM_DEVICE_FACTORY_DEFINE_INTERNAL (MACVLAN, Macvlan, macvlan,

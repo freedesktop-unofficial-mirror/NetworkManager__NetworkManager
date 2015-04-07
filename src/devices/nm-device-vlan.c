@@ -664,25 +664,13 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 	int parent_ifindex = -1;
 	NMDevice *parent, *device;
 
-	if (plink->type != NM_LINK_TYPE_VLAN)
-		return NULL;
-
-	/* Have to find the parent device */
+	/* Find the parent device */
 	if (!nm_platform_vlan_get_info (plink->ifindex, &parent_ifindex, NULL)) {
-		nm_log_err (LOGD_HW, "(%s): failed to get VLAN parent ifindex", plink->name);
+		g_set_error_literal (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		                     "VLAN parent ifindex unknown");
 		return NULL;
 	}
-
 	parent = nm_manager_get_device_by_ifindex (nm_manager_get (), parent_ifindex);
-	if (!parent) {
-		/* If udev signaled the VLAN interface before it signaled
-		 * the VLAN's parent at startup we may not know about the
-		 * parent device yet.  But we'll find it on the second pass
-		 * from nm_manager_start().
-		 */
-		nm_log_dbg (LOGD_HW, "(%s): VLAN parent interface unknown", plink->name);
-		return NULL;
-	}
 
 	device = (NMDevice *) g_object_new (NM_TYPE_DEVICE_VLAN,
 	                                    NM_DEVICE_PLATFORM_DEVICE, plink,
@@ -692,6 +680,8 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 	                                    NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_VLAN,
 	                                    NULL);
 	if (NM_DEVICE_VLAN_GET_PRIVATE (device)->invalid) {
+		g_set_error_literal (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		                     "VLAN initialization failed");
 		g_object_unref (device);
 		device = NULL;
 	}

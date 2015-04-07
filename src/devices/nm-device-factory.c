@@ -28,6 +28,7 @@
 
 #include "nm-device-factory.h"
 #include "nm-logging.h"
+#include "nm-platform.h"
 
 enum {
 	DEVICE_ADDED,
@@ -126,12 +127,38 @@ nm_device_factory_new_link (NMDeviceFactory *factory,
                             NMPlatformLink *plink,
                             GError **error)
 {
+	NMDeviceFactory *interface;
+	const NMLinkType *link_types = NULL;
+	const char **setting_types = NULL;
+	int i;
+
 	g_return_val_if_fail (factory != NULL, NULL);
 	g_return_val_if_fail (plink != NULL, NULL);
 
-	if (NM_DEVICE_FACTORY_GET_INTERFACE (factory)->new_link)
-		return NM_DEVICE_FACTORY_GET_INTERFACE (factory)->new_link (factory, plink, error);
-	return NULL;
+	/* Ensure the factory can create interfaces for this connection */
+	nm_device_factory_get_supported_types (factory, &link_types, &setting_types);
+	for (i = 0; link_types[i] > NM_LINK_TYPE_UNKNOWN; i++) {
+		if (plink->type == link_types[i])
+			break;
+	}
+
+	if (link_types[i] == NM_LINK_TYPE_UNKNOWN) {
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		             "Device factory %s does not support link type %s (%d)",
+		             G_OBJECT_TYPE_NAME (factory),
+		             plink->type_name, plink->type);
+		return NULL;
+	}
+
+	interface = NM_DEVICE_FACTORY_GET_INTERFACE (factory);
+	if (!interface->new_link) {
+		g_set_error (error, NM_MANAGER_ERROR, NM_MANAGER_ERROR_FAILED,
+		             "Device factory %s cannot manage new devices",
+		             G_OBJECT_TYPE_NAME (factory));
+		return NULL;
+	}
+
+	return interface->new_link (factory, plink, error);
 }
 
 NMDevice *

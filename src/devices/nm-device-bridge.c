@@ -478,16 +478,13 @@ nm_device_bridge_class_init (NMDeviceBridgeClass *klass)
 static NMDevice *
 new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 {
-	if (plink->type == NM_LINK_TYPE_BRIDGE) {
-		return (NMDevice *) g_object_new (NM_TYPE_DEVICE_BRIDGE,
-		                                  NM_DEVICE_PLATFORM_DEVICE, plink,
-		                                  NM_DEVICE_DRIVER, "bridge",
-		                                  NM_DEVICE_TYPE_DESC, "Bridge",
-		                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_BRIDGE,
-		                                  NM_DEVICE_IS_MASTER, TRUE,
-		                                  NULL);
-	}
-	return NULL;
+	return (NMDevice *) g_object_new (NM_TYPE_DEVICE_BRIDGE,
+	                                  NM_DEVICE_PLATFORM_DEVICE, plink,
+	                                  NM_DEVICE_DRIVER, "bridge",
+	                                  NM_DEVICE_TYPE_DESC, "Bridge",
+	                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_BRIDGE,
+	                                  NM_DEVICE_IS_MASTER, TRUE,
+	                                  NULL);
 }
 
 static NMDevice *

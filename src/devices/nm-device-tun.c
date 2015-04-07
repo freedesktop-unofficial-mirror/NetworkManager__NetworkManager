@@ -278,8 +278,10 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 		mode = "tun";
 	else if (plink->type == NM_LINK_TYPE_TAP)
 		mode = "tap";
-	else
-		return NULL;
+	else {
+		g_warn_if_reached ();
+		mode = "unknown";
+	}
 
 	return (NMDevice *) g_object_new (NM_TYPE_DEVICE_TUN,
 	                                  NM_DEVICE_PLATFORM_DEVICE, plink,

@@ -295,14 +295,11 @@ nm_device_infiniband_class_init (NMDeviceInfinibandClass *klass)
 static NMDevice *
 new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 {
-	if (plink->type == NM_LINK_TYPE_INFINIBAND) {
-		return (NMDevice *) g_object_new (NM_TYPE_DEVICE_INFINIBAND,
-		                                  NM_DEVICE_PLATFORM_DEVICE, plink,
-		                                  NM_DEVICE_TYPE_DESC, "InfiniBand",
-		                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_INFINIBAND,
-		                                  NULL);
-	}
-	return NULL;
+	return (NMDevice *) g_object_new (NM_TYPE_DEVICE_INFINIBAND,
+	                                  NM_DEVICE_PLATFORM_DEVICE, plink,
+	                                  NM_DEVICE_TYPE_DESC, "InfiniBand",
+	                                  NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_INFINIBAND,
+	                                  NULL);
 }
 
 static NMDevice *

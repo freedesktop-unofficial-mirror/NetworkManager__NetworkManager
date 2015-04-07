@@ -50,9 +50,7 @@ nm_device_factory_create (GError **error)
 static NMDevice *
 new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 {
-	if (plink->type == NM_LINK_TYPE_TEAM)
-		 return nm_device_team_new (plink);
-	return NULL;
+	return nm_device_team_new (plink);
 }
 
 static NMDevice *

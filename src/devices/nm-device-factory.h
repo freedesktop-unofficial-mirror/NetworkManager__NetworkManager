@@ -92,15 +92,17 @@ struct _NMDeviceFactory {
 	/**
 	 * new_link:
 	 * @factory: the #NMDeviceFactory
-	 * @link: the new link
+	 * @plink: the new link
 	 * @error: error if the link could be claimed but an error occurred
 	 *
 	 * The NetworkManager core was notified of a new link which the plugin
 	 * may want to claim and create a #NMDevice subclass for.  If the link
-	 * represents a device the factory is capable of claiming, but the device
-	 * could not be created, %NULL should be returned and @error should be set.
-	 * %NULL should always be returned and @error should never be set if the
-	 * factory cannot create devices for the type which @link represents.
+	 * represents a device which the factory does not support, or the link
+	 * is supported but the device could not be created, %NULL should be
+	 * returned and @error should be set.
+	 *
+	 * @plink is guaranteed to be one of the types the factory returns in
+	 * get_supported_types().
 	 *
 	 * Returns: the #NMDevice if the link was claimed and created, %NULL if not
 	 */

@@ -1966,13 +1966,9 @@ platform_link_added (NMManager *self,
 	factory = nm_device_factory_manager_find_factory (ltypes, NULL);
 	if (factory) {
 		device = nm_device_factory_new_link (factory, plink, &error);
-		if (device && NM_IS_DEVICE (device)) {
-			g_assert_no_error (error);
-		} else if (error) {
-			nm_log_warn (LOGD_HW, "%s: factory failed to create device: (%d) %s",
-			             plink->udi,
-			             error ? error->code : -1,
-			             error ? error->message : "(unknown)");
+		if (!device) {
+			nm_log_warn (LOGD_HW, "%s: factory failed to create device: %s",
+			             plink->name, error->message);
 			g_clear_error (&error);
 			return;
 		}

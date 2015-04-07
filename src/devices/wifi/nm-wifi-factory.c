@@ -65,7 +65,7 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 		return nm_device_wifi_new (plink);
 	else if (plink->type == NM_LINK_TYPE_OLPC_MESH)
 		return nm_device_olpc_mesh_new (plink);
-	return NULL;
+	g_assert_not_reached ();
 }
 
 NM_DEVICE_FACTORY_DECLARE_TYPES (

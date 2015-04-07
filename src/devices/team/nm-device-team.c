@@ -674,8 +674,6 @@ release_slave (NMDevice *device,
 NMDevice *
 nm_device_team_new (NMPlatformLink *platform_device)
 {
-	g_return_val_if_fail (platform_device != NULL, NULL);
-
 	return (NMDevice *) g_object_new (NM_TYPE_DEVICE_TEAM,
 	                                  NM_DEVICE_PLATFORM_DEVICE, platform_device,
 	                                  NM_DEVICE_DRIVER, "team",
