@@ -688,20 +688,16 @@ nm_device_team_new (NMPlatformLink *platform_device)
 NMDevice *
 nm_device_team_new_for_connection (NMConnection *connection, GError **error)
 {
-	const char *iface;
+	const char *iface = nm_connection_get_interface_name (connection);
 
-	g_return_val_if_fail (connection != NULL, NULL);
-
-	iface = nm_connection_get_interface_name (connection);
-	g_return_val_if_fail (iface != NULL, NULL);
+	g_assert (iface);
 
 	if (   !nm_platform_team_add (iface)
 	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
-		g_set_error (error,
-		             NM_DEVICE_ERROR,
-		             NM_DEVICE_ERROR_CREATION_FAILED,
-		             "failed to create team master interface '%s' for connection '%s': %s",
-		             iface, nm_connection_get_id (connection),
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		             "Failed to create team master interface '%s' for '%s': %s",
+		             iface,
+		             nm_connection_get_id (connection),
 		             nm_platform_get_error_msg ());
 		return NULL;
 	}

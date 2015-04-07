@@ -1034,7 +1034,6 @@ system_create_virtual_device (NMManager *self, NMConnection *connection, GError 
 {
 	NMManagerPrivate *priv = NM_MANAGER_GET_PRIVATE (self);
 	NMDeviceFactory *factory;
-	GError *local_err = NULL;
 	GSList *iter;
 	char *iface = NULL;
 	NMDevice *device = NULL, *parent = NULL;
@@ -1095,9 +1094,8 @@ system_create_virtual_device (NMManager *self, NMConnection *connection, GError 
 	device = nm_device_factory_create_virtual_device_for_connection (factory,
 	                                                                 connection,
 	                                                                 parent,
-	                                                                 &local_err);
+	                                                                 error);
 	if (device) {
-		g_assert_no_error (local_err);
 		if (nm_owned)
 			nm_device_set_nm_owned (device);
 
@@ -1107,18 +1105,6 @@ system_create_virtual_device (NMManager *self, NMConnection *connection, GError 
 		add_device (self, device, !nm_owned);
 
 		g_object_unref (device);
-	} else if (local_err) {
-		nm_log_err (LOGD_DEVICE, "(%s) failed to create virtual device: %s",
-		            nm_connection_get_id (connection), local_err->message);
-		g_propagate_error (error, local_err);
-	} else {
-		nm_log_err (LOGD_DEVICE, "(%s) failed to create virtual device",
-		            nm_connection_get_id (connection));
-		g_set_error (error,
-		             NM_MANAGER_ERROR,
-		             NM_MANAGER_ERROR_FAILED,
-		             "(%s) failed to create virtual device",
-		             nm_connection_get_connection_type (connection));
 	}
 
 	priv->ignore_link_added_cb--;

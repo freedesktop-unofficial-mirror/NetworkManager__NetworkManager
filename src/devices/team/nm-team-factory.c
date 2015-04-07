@@ -61,9 +61,7 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
                                       NMDevice *parent,
                                       GError **error)
 {
-	if (nm_connection_is_type (connection, NM_SETTING_TEAM_SETTING_NAME))
-		return nm_device_team_new_for_connection (connection, error);
-	return NULL;
+	return nm_device_team_new_for_connection (connection, error);
 }
 
 NM_DEVICE_FACTORY_DECLARE_TYPES (

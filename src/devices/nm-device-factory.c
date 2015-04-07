@@ -141,15 +141,40 @@ nm_device_factory_create_virtual_device_for_connection (NMDeviceFactory *factory
                                                         GError **error)
 {
 	NMDeviceFactory *interface;
+	const char **setting_types = NULL;
+	gboolean found = FALSE;
+	int i;
 
 	g_return_val_if_fail (factory, NULL);
 	g_return_val_if_fail (connection, NULL);
 	g_return_val_if_fail (!error || !*error, NULL);
 
+	/* Ensure the factory can create interfaces for this connection */
+	nm_device_factory_get_supported_types (factory, NULL, &setting_types);
+	for (i = 0; setting_types && setting_types[i]; i++) {
+		if (nm_connection_is_type (connection, setting_types[i])) {
+			found = TRUE;
+			break;
+		}
+	}
+
+	if (!found) {
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_INCOMPATIBLE_CONNECTION,
+		             "Device factory %s does not support connection type %s",
+		             G_OBJECT_TYPE_NAME (factory),
+		             nm_connection_get_connection_type (connection));
+		return NULL;
+	}
+
 	interface = NM_DEVICE_FACTORY_GET_INTERFACE (factory);
-	if (interface->create_virtual_device_for_connection)
-		return interface->create_virtual_device_for_connection (factory, connection, parent, error);
-	return NULL;
+	if (!interface->create_virtual_device_for_connection) {
+		g_set_error (error, NM_MANAGER_ERROR, NM_MANAGER_ERROR_FAILED,
+		             "Device factory %s cannot create virtual devices",
+		             G_OBJECT_TYPE_NAME (factory));
+		return NULL;
+	}
+
+	return interface->create_virtual_device_for_connection (factory, connection, parent, error);
 }
 
 /*******************************************************************/
@@ -350,9 +375,9 @@ _add_factory (NMDeviceFactory *factory,
 	}
 
 	g_object_set_data_full (G_OBJECT (factory), PLUGIN_PATH_TAG, g_strdup (path), g_free);
-	for (i = 0; link_types[i] > NM_LINK_TYPE_UNKNOWN; i++)
+	for (i = 0; link_types && link_types[i] > NM_LINK_TYPE_UNKNOWN; i++)
 		g_hash_table_insert (factories_by_link, GUINT_TO_POINTER (link_types[i]), g_object_ref (factory));
-	for (i = 0; setting_types[i]; i++)
+	for (i = 0; setting_types && setting_types[i]; i++)
 		g_hash_table_insert (factories_by_setting, (char *) setting_types[i], g_object_ref (factory));
 
 	callback (factory, user_data);

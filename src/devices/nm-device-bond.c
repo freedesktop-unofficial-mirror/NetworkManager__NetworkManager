@@ -571,19 +571,17 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
                                       NMDevice *parent,
                                       GError **error)
 {
-	const char *iface;
+	const char *iface = nm_connection_get_interface_name (connection);
 
-	if (!nm_connection_is_type (connection, NM_SETTING_BOND_SETTING_NAME))
-		return NULL;
-
-	iface = nm_connection_get_interface_name (connection);
-	g_return_val_if_fail (iface != NULL, NULL);
+	g_assert (iface);
 
 	if (   !nm_platform_bond_add (iface)
-		&& nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
-		nm_log_warn (LOGD_DEVICE | LOGD_BOND, "(%s): failed to create bonding master interface for '%s': %s",
-			         iface, nm_connection_get_id (connection),
-			         nm_platform_get_error_msg ());
+	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		             "Failed to create bond interface '%s' for '%s': %s",
+		             iface,
+		             nm_connection_get_id (connection),
+		             nm_platform_get_error_msg ());
 		return NULL;
 	}
 

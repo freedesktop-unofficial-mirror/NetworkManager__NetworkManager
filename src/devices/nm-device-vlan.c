@@ -40,6 +40,7 @@
 #include "nm-device-factory.h"
 #include "nm-manager.h"
 #include "nm-core-internal.h"
+#include "gsystem-local-alloc.h"
 
 #include "nm-device-vlan-glue.h"
 
@@ -706,15 +707,16 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 {
 	NMDevice *device;
 	NMSettingVlan *s_vlan;
-	char *iface;
+	gs_free char *iface = NULL;
 
-	if (!nm_connection_is_type (connection, NM_SETTING_VLAN_SETTING_NAME))
+	if (!NM_IS_DEVICE (parent)) {
+		g_set_error_literal (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		                     "VLAN interfaces must have parents");
 		return NULL;
-
-	g_return_val_if_fail (NM_IS_DEVICE (parent), NULL);
+	}
 
 	s_vlan = nm_connection_get_setting_vlan (connection);
-	g_return_val_if_fail (s_vlan != NULL, NULL);
+	g_assert (s_vlan);
 
 	iface = g_strdup (nm_connection_get_interface_name (connection));
 	if (!iface) {
@@ -727,9 +729,11 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 	                              nm_setting_vlan_get_id (s_vlan),
 	                              nm_setting_vlan_get_flags (s_vlan))
 	    && nm_platform_get_error () != NM_PLATFORM_ERROR_EXISTS) {
-		nm_log_warn (LOGD_DEVICE | LOGD_VLAN, "(%s) failed to add VLAN interface for '%s'",
-		             iface, nm_connection_get_id (connection));
-		g_free (iface);
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		             "Failed to create VLAN interface '%s' for '%s': %s",
+		             iface,
+		             nm_connection_get_id (connection),
+		             nm_platform_get_error_msg ());
 		return NULL;
 	}
 
@@ -740,8 +744,10 @@ create_virtual_device_for_connection (NMDeviceFactory *factory,
 	                                    NM_DEVICE_TYPE_DESC, "VLAN",
 	                                    NM_DEVICE_DEVICE_TYPE, NM_DEVICE_TYPE_VLAN,
 	                                    NULL);
-	g_free (iface);
 	if (NM_DEVICE_VLAN_GET_PRIVATE (device)->invalid) {
+		g_set_error (error, NM_DEVICE_ERROR, NM_DEVICE_ERROR_CREATION_FAILED,
+		             "Failed to create VLAN interface '%s' for '%s': initialization failed",
+		             iface, nm_connection_get_id (connection));
 		g_object_unref (device);
 		device = NULL;
 	}
