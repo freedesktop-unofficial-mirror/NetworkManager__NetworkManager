@@ -146,10 +146,10 @@ struct _NMDeviceFactory {
 	 * get_virtual_iface_name:
 	 * @factory: the #NMDeviceFactory
 	 * @connection: the #NMConnection to return the virtual interface name for
+	 * @parent_iface: parent interface name
 	 *
 	 * Given a connection, returns the interface name that a device activating
-	 * that connection would have, possibly using parent devices for
-	 * constructing the name.
+	 * that connection would have.
 	 *
 	 * Returns: the interface name, or %NULL
 	 */

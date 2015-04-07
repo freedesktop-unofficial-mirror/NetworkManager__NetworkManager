@@ -918,9 +918,9 @@ find_parent_device_for_connection (NMManager *self, NMConnection *connection)
  * @error: an error if determining the virtual interface name failed
  *
  * Given @connection, returns the interface name that the connection
- * would represent if it is a virtual connection.  Non-virtual connections
- * will return %NULL.  If the connection is virtual, and the name could not
- * be determined, @error is set.
+ * would represent if it is a virtual connection.  %NULL is returned and
+ * @error is set if the connection is not virtual, or if the name could
+ * not be determined.
  *
  * Returns: the expected interface name (caller takes ownership), or %NULL
  */
