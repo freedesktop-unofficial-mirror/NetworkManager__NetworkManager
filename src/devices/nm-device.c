@@ -5954,7 +5954,8 @@ nm_device_queue_activation (NMDevice *self, NMActRequest *req)
 
 	if (!priv->act_request && !must_queue) {
 		/* Just activate immediately */
-		g_assert (_device_activate (self, req));
+		if (!_device_activate (self, req))
+			g_assert_not_reached ();
 		return;
 	}
 
