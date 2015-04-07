@@ -577,25 +577,18 @@ static gboolean
 hostname_is_dynamic (void)
 {
 	GIOChannel *channel;
-	const char *pattern = "DHCLIENT_SET_HOSTNAME=";
 	char *str = NULL;
-	int pattern_len;
 	gboolean dynamic = FALSE;
 
 	channel = g_io_channel_new_file (CONF_DHCP, "r", NULL);
 	if (!channel)
 		return dynamic;
 
-	pattern_len = strlen (pattern);
-
 	while (g_io_channel_read_line (channel, &str, NULL, NULL, NULL) != G_IO_STATUS_EOF) {
 		if (str) {
 			g_strstrip (str);
-			if (!strcmp (str, "DHCLIENT_SET_HOSTNAME=\"yes\"")) {
-				dynamic = TRUE;
-				g_free (str);
-				break;
-			}
+			if (g_str_has_prefix (str, "DHCLIENT_SET_HOSTNAME="))
+				dynamic = strcmp (&str[STRLEN ("DHCLIENT_SET_HOSTNAME=")], "\"yes\"") == 0;
 			g_free (str);
 		}
 	}
