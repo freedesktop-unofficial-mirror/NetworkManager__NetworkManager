@@ -102,8 +102,8 @@ nm_device_factory_get_type (void)
 
 void
 nm_device_factory_get_supported_types (NMDeviceFactory *factory,
-	                                   const NMLinkType **out_link_types,
-	                                   const char ***out_setting_types)
+                                       const NMLinkType **out_link_types,
+                                       const char ***out_setting_types)
 {
 	g_return_if_fail (factory != NULL);
 
@@ -343,8 +343,8 @@ _add_factory (NMDeviceFactory *factory,
 		if (found) {
 			nm_log_warn (LOGD_HW, "Loading device plugin failed: multiple plugins "
 			             "for same type (using '%s' instead of '%s')",
-				         (char *) g_object_get_data (G_OBJECT (found), PLUGIN_PATH_TAG),
-				         path);
+			             (char *) g_object_get_data (G_OBJECT (found), PLUGIN_PATH_TAG),
+			             path);
 			return FALSE;
 		}
 	}

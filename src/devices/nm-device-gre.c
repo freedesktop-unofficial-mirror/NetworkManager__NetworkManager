@@ -280,7 +280,7 @@ new_link (NMDeviceFactory *factory, NMPlatformLink *plink, GError **error)
 }
 
 NM_DEVICE_FACTORY_DEFINE_INTERNAL (GRE, Gre, gre,
-	NM_DEVICE_FACTORY_DECLARE_LINK_TYPES    (NM_LINK_TYPE_GRE, NM_LINK_TYPE_GRETAP),
+	NM_DEVICE_FACTORY_DECLARE_LINK_TYPES (NM_LINK_TYPE_GRE, NM_LINK_TYPE_GRETAP),
 	factory_iface->new_link = new_link;
 	)
 
