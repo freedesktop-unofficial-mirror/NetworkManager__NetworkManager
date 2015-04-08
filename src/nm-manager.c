@@ -1945,7 +1945,6 @@ platform_link_added (NMManager *self,
 	NMManagerPrivate *priv = NM_MANAGER_GET_PRIVATE (self);
 	NMDeviceFactory *factory;
 	NMDevice *device = NULL;
-	const NMLinkType ltypes[] = { plink->type, NM_LINK_TYPE_NONE };
 	GError *error = NULL;
 
 	g_return_if_fail (ifindex > 0);
@@ -1963,7 +1962,7 @@ platform_link_added (NMManager *self,
 		return;
 
 	/* Try registered device factories */
-	factory = nm_device_factory_manager_find_factory (ltypes, NULL);
+	factory = nm_device_factory_manager_find_factory_for_link_type (plink->type);
 	if (factory) {
 		device = nm_device_factory_new_link (factory, plink, &error);
 		if (!device) {

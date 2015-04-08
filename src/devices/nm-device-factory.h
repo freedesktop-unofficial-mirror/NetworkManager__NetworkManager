@@ -256,8 +256,7 @@ typedef void (*NMDeviceFactoryManagerFactoryFunc)    (NMDeviceFactory *factory,
 void              nm_device_factory_manager_load_factories (NMDeviceFactoryManagerFactoryFunc callback,
                                                             gpointer user_data);
 
-NMDeviceFactory * nm_device_factory_manager_find_factory   (const NMLinkType *needle_link_types,
-                                                            const char **needle_setting_types);
+NMDeviceFactory * nm_device_factory_manager_find_factory_for_link_type  (NMLinkType link_type);
 
 NMDeviceFactory * nm_device_factory_manager_find_factory_for_connection (NMConnection *connection);
 

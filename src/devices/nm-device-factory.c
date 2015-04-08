@@ -227,9 +227,9 @@ _cleanup (void)
 		g_hash_table_destroy (factories_by_setting);
 }
 
-NMDeviceFactory *
-nm_device_factory_manager_find_factory (const NMLinkType *needle_link_types,
-                                        const char **needle_setting_types)
+static NMDeviceFactory *
+find_factory (const NMLinkType *needle_link_types,
+              const char **needle_setting_types)
 {
 	NMDeviceFactory *found;
 	guint i;
@@ -252,12 +252,21 @@ nm_device_factory_manager_find_factory (const NMLinkType *needle_link_types,
 }
 
 NMDeviceFactory *
+nm_device_factory_manager_find_factory_for_link_type (NMLinkType link_type)
+{
+	const NMLinkType ltypes[2] = { link_type, NM_LINK_TYPE_NONE };
+
+	g_assert (ltypes[0] > NM_LINK_TYPE_UNKNOWN);
+	return find_factory (ltypes, NULL);
+}
+
+NMDeviceFactory *
 nm_device_factory_manager_find_factory_for_connection (NMConnection *connection)
 {
 	const char *stypes[2] = { nm_connection_get_connection_type (connection), NULL };
 
 	g_assert (stypes[0]);
-	return nm_device_factory_manager_find_factory (NULL, stypes);
+	return find_factory (NULL, stypes);
 }
 
 void
@@ -269,8 +278,10 @@ nm_device_factory_manager_for_each_factory (NMDeviceFactoryManagerFactoryFunc ca
 	GSList *list_iter, *list = NULL;
 
 	g_hash_table_iter_init (&iter, factories_by_link);
-	while (g_hash_table_iter_next (&iter, NULL, (gpointer) &factory))
-		list = g_slist_prepend (list, factory);
+	while (g_hash_table_iter_next (&iter, NULL, (gpointer) &factory)) {
+		if (!g_slist_find (list, factory))
+			list = g_slist_prepend (list, factory);
+	}
 
 	g_hash_table_iter_init (&iter, factories_by_setting);
 	while (g_hash_table_iter_next (&iter, NULL, (gpointer) &factory)) {
@@ -278,7 +289,6 @@ nm_device_factory_manager_for_each_factory (NMDeviceFactoryManagerFactoryFunc ca
 			list = g_slist_prepend (list, factory);
 	}
 
-	list = g_slist_reverse (list);
 	for (list_iter = list; list_iter; list_iter = list_iter->next)
 		callback (list_iter->data, user_data);
 
@@ -391,7 +401,7 @@ _add_factory (NMDeviceFactory *factory,
 
 	nm_device_factory_get_supported_types (factory, &link_types, &setting_types);
 	if (check_duplicates) {
-		found = nm_device_factory_manager_find_factory (link_types, setting_types);
+		found = find_factory (link_types, setting_types);
 		if (found) {
 			nm_log_warn (LOGD_HW, "Loading device plugin failed: multiple plugins "
 			             "for same type (using '%s' instead of '%s')",
