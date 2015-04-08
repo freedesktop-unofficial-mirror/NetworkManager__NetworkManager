@@ -350,21 +350,31 @@ ethtool_get_stringset_index (const char *ifname, int stringset_id, const char *s
 	return -1;
 }
 
-static const char *
-ethtool_get_driver (const char *ifname)
+static gboolean
+link_get_driver_info (NMPlatform *platform,
+                      int ifindex,
+                      char **out_driver_name,
+                      char **out_driver_version,
+                      char **out_fw_version)
 {
 	struct ethtool_drvinfo drvinfo = { 0 };
+	const char *ifname;
 
-	g_return_val_if_fail (ifname != NULL, NULL);
-
+	ifname = nm_platform_link_get_name (ifindex);
+	if (!ifname)
+		return FALSE;
 	drvinfo.cmd = ETHTOOL_GDRVINFO;
 	if (!ethtool_get (ifname, &drvinfo))
-		return NULL;
+		return FALSE;
 
-	if (!*drvinfo.driver)
-		return NULL;
+	if (out_driver_name)
+		*out_driver_name = g_strdup (drvinfo.driver);
+	if (out_driver_version)
+		*out_driver_version = g_strdup (drvinfo.version);
+	if (out_fw_version)
+		*out_fw_version = g_strdup (drvinfo.fw_version);
 
-	return g_intern_string (drvinfo.driver);
+	return TRUE;
 }
 
 /******************************************************************
@@ -868,7 +878,8 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 
 	if (!type) {
 		int arptype = rtnl_link_get_arptype (rtnllink);
-		const char *driver;
+		int ifindex = rtnl_link_get_ifindex (rtnllink);
+		gs_free char *driver = NULL;
 		const char *ifname;
 		GUdevDevice *udev_device = NULL;
 
@@ -890,9 +901,10 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 				return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
 		}
 
-		driver = ethtool_get_driver (ifname);
-		if (!g_strcmp0 (driver, "openvswitch"))
-			return_type (NM_LINK_TYPE_OPENVSWITCH, "openvswitch");
+		if (nm_platform_link_get_driver_info (ifindex, &driver, NULL, NULL)) {
+			if (!g_strcmp0 (driver, "openvswitch"))
+				return_type (NM_LINK_TYPE_OPENVSWITCH, "openvswitch");
+		}
 
 		if (platform) {
 			udev_device = g_hash_table_lookup (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->udev_devices,
@@ -955,6 +967,7 @@ init_link (NMPlatform *platform, NMPlatformLink *info, struct rtnl_link *rtnllin
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
 	GUdevDevice *udev_device;
 	const char *name;
+	char *tmp;
 
 	g_return_val_if_fail (rtnllink, FALSE);
 
@@ -979,8 +992,12 @@ init_link (NMPlatform *platform, NMPlatformLink *info, struct rtnl_link *rtnllin
 		info->driver = udev_get_driver (udev_device, info->ifindex);
 		if (!info->driver)
 			info->driver = g_intern_string (rtnl_link_get_type (rtnllink));
-		if (!info->driver)
-			info->driver = ethtool_get_driver (info->name);
+		if (!info->driver) {
+			if (nm_platform_link_get_driver_info (info->ifindex, &tmp, NULL, NULL)) {
+				info->driver = g_intern_string (tmp);
+				g_free (tmp);
+			}
+		}
 		if (!info->driver)
 			info->driver = "unknown";
 		info->udi = g_udev_device_get_sysfs_path (udev_device);
@@ -2841,32 +2858,6 @@ link_get_dev_id (NMPlatform *platform, int ifindex)
 	int_val = _nm_utils_ascii_str_to_int64 (id, 16, 0, G_MAXUINT16, 0);
 
 	return errno ? 0 : (int) int_val;
-}
-
-static gboolean
-link_get_driver_info (NMPlatform *platform,
-                      int ifindex,
-                      char **out_driver_version,
-                      char **out_fw_version)
-{
-	gs_free struct ethtool_drvinfo *info = NULL;
-	const char *ifname;
-
-	ifname = nm_platform_link_get_name (ifindex);
-	if (!ifname)
-		return FALSE;
-
-	info = g_malloc0 (sizeof (*info) + sizeof (guint32));
-	info->cmd = ETHTOOL_GDRVINFO;
-	if (!ethtool_get (ifname, info))
-		return FALSE;
-
-	if (out_driver_version)
-		*out_driver_version = g_strdup (info->version);
-	if (out_fw_version)
-		*out_fw_version = g_strdup (info->fw_version);
-
-	return TRUE;
 }
 
 static int

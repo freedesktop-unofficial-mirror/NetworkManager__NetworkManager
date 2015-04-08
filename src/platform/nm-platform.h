@@ -401,6 +401,7 @@ typedef struct {
 	gboolean (*link_get_wake_on_lan) (NMPlatform *, int ifindex);
 	gboolean (*link_get_driver_info) (NMPlatform *,
 	                                  int ifindex,
+	                                  char **out_driver_name,
 	                                  char **out_driver_version,
 	                                  char **out_fw_version);
 
@@ -556,6 +557,7 @@ char    *nm_platform_link_get_physical_port_id (int ifindex);
 guint    nm_platform_link_get_dev_id (int ifindex);
 gboolean nm_platform_link_get_wake_on_lan (int ifindex);
 gboolean nm_platform_link_get_driver_info (int ifindex,
+                                           char **out_driver_name,
                                            char **out_driver_version,
                                            char **out_fw_version);
 

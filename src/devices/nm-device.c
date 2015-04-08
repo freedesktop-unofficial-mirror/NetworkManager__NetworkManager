@@ -8425,9 +8425,7 @@ constructor (GType type,
 		priv->capabilities |= NM_DEVICE_GET_CLASS (self)->get_generic_capabilities (self);
 
 	if (priv->ifindex > 0)
-		nm_platform_link_get_driver_info (priv->ifindex, &priv->driver_version, &priv->firmware_version);
-	else if (priv->ifindex <= 0 && !device_has_capability (self, NM_DEVICE_CAP_IS_NON_KERNEL))
-		_LOGW (LOGD_HW, "failed to look up interface index");
+		nm_platform_link_get_driver_info (priv->ifindex, NULL, &priv->driver_version, &priv->firmware_version);
 
 	/* Watch for external IP config changes */
 	platform = nm_platform_get ();

@@ -538,9 +538,12 @@ link_get_wake_on_lan (NMPlatform *platform, int ifindex)
 static gboolean
 link_get_driver_info (NMPlatform *platform,
                       int ifindex,
+                      char **out_driver_name,
                       char **out_driver_version,
                       char **out_fw_version)
 {
+	if (out_driver_name)
+		*out_driver_name = NULL;
 	if (out_driver_version)
 		*out_driver_version = NULL;
 	if (out_fw_version)
