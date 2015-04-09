@@ -24,11 +24,9 @@
 #include <syslog.h>
 
 #include "nm-rdisc.h"
-#include "nm-fake-rdisc.h"
 #include "nm-lndp-rdisc.h"
 #include "nm-logging.h"
 
-#include "nm-fake-platform.h"
 #include "nm-linux-platform.h"
 
 int
@@ -36,7 +34,6 @@ main (int argc, char **argv)
 {
 	GMainLoop *loop;
 	NMRDisc *rdisc;
-	NMRDisc *(*new) (int ifindex, const char *ifname);
 	int ifindex = 1;
 	const char *ifname;
 
@@ -48,25 +45,17 @@ main (int argc, char **argv)
 	nm_logging_setup ("debug", "ip6", NULL, NULL);
 	openlog (G_LOG_DOMAIN, LOG_CONS | LOG_PERROR, LOG_DAEMON);
 
-	argv++;
-	if (!g_strcmp0 (argv[0], "--fake")) {
-		new = nm_fake_rdisc_new;
-		nm_fake_platform_setup ();
-		argv++;
-	} else {
-		new = nm_lndp_rdisc_new;
-		nm_linux_platform_setup ();
-	}
+	nm_linux_platform_setup ();
 
-	if (argv[0]) {
-		ifname = argv[0];
+	if (argv[1]) {
+		ifname = argv[1];
 		ifindex = nm_platform_link_get_ifindex (ifname);
 	} else {
 		ifindex = 1;
 		ifname = nm_platform_link_get_name (ifindex);
 	}
 
-	rdisc = new (ifindex, ifname);
+	rdisc = nm_lndp_rdisc_new (ifindex, ifname);
 	if (!rdisc)
 		return EXIT_FAILURE;
 
