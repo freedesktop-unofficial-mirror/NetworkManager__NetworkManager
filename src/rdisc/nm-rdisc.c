@@ -56,7 +56,7 @@ static guint signals[LAST_SIGNAL] = { 0 };
 gboolean
 nm_rdisc_add_gateway (NMRDisc *rdisc, const NMRDiscGateway *new)
 {
-	int i;
+	int i, insert_idx = -1;
 
 	for (i = 0; i < rdisc->gateways->len; i++) {
 		NMRDiscGateway *item = &g_array_index (rdisc->gateways, NMRDiscGateway, i);
@@ -71,11 +71,12 @@ nm_rdisc_add_gateway (NMRDisc *rdisc, const NMRDiscGateway *new)
 		}
 
 		/* Put before less preferable gateways. */
-		if (item->preference < new->preference)
-			break;
+		if (item->preference < new->preference && insert_idx < 0)
+			insert_idx = i;
 	}
 
-	g_array_insert_val (rdisc->gateways, i, *new);
+	if (new->lifetime)
+		g_array_insert_val (rdisc->gateways, CLAMP (insert_idx, 0, G_MAXINT), *new);
 	return TRUE;
 }
 
@@ -102,6 +103,8 @@ nm_rdisc_add_address (NMRDisc *rdisc, const NMRDiscAddress *new)
 	 **/
 	if (rdisc->max_addresses && rdisc->addresses->len >= rdisc->max_addresses)
 		return FALSE;
+	if (!new->lifetime)
+		return FALSE;
 
 	g_array_insert_val (rdisc->addresses, i, *new);
 	return TRUE;
@@ -110,7 +113,7 @@ nm_rdisc_add_address (NMRDisc *rdisc, const NMRDiscAddress *new)
 gboolean
 nm_rdisc_add_route (NMRDisc *rdisc, const NMRDiscRoute *new)
 {
-	int i;
+	int i, insert_idx = -1;
 
 	for (i = 0; i < rdisc->routes->len; i++) {
 		NMRDiscRoute *item = &g_array_index (rdisc->routes, NMRDiscRoute, i);
@@ -125,11 +128,12 @@ nm_rdisc_add_route (NMRDisc *rdisc, const NMRDiscRoute *new)
 		}
 
 		/* Put before less preferable routes. */
-		if (item->preference < new->preference)
-			break;
+		if (item->preference < new->preference && insert_idx < 0)
+			insert_idx = i;
 	}
 
-	g_array_insert_val (rdisc->routes, i, *new);
+	if (new->lifetime)
+		g_array_insert_val (rdisc->routes, CLAMP (insert_idx, 0, G_MAXINT), *new);
 	return TRUE;
 }
 
@@ -159,7 +163,8 @@ nm_rdisc_add_dns_server (NMRDisc *rdisc, const NMRDiscDNSServer *new)
 		}
 	}
 
-	g_array_insert_val (rdisc->dns_servers, i, *new);
+	if (new->lifetime)
+		g_array_insert_val (rdisc->dns_servers, i, *new);
 	return TRUE;
 }
 
@@ -191,9 +196,11 @@ nm_rdisc_add_dns_domain (NMRDisc *rdisc, const NMRDiscDNSDomain *new)
 		}
 	}
 
-	g_array_insert_val (rdisc->dns_domains, i, *new);
-	item = &g_array_index (rdisc->dns_domains, NMRDiscDNSDomain, i);
-	item->domain = g_strdup (new->domain);
+	if (new->lifetime) {
+		g_array_insert_val (rdisc->dns_domains, i, *new);
+		item = &g_array_index (rdisc->dns_domains, NMRDiscDNSDomain, i);
+		item->domain = g_strdup (new->domain);
+	}
 	return TRUE;
 }
 
