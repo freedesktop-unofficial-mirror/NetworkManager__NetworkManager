@@ -3997,6 +3997,12 @@ impl_manager_check_connectivity (NMManager *manager,
 	nm_auth_chain_add_call (chain, NM_AUTH_PERMISSION_NETWORK_CONTROL, TRUE);
 }
 
+static void
+start_factory (NMDeviceFactory *factory, gpointer user_data)
+{
+	nm_device_factory_start (factory);
+}
+
 void
 nm_manager_start (NMManager *self)
 {
@@ -4032,7 +4038,7 @@ nm_manager_start (NMManager *self)
 	system_hostname_changed_cb (priv->settings, NULL, self);
 
 	/* Start device factories */
-	nm_device_factory_manager_for_each_factory ((NMDeviceFactoryManagerFactoryFunc) nm_device_factory_start, NULL);
+	nm_device_factory_manager_for_each_factory (start_factory, NULL);
 
 	nm_platform_query_devices ();
 
