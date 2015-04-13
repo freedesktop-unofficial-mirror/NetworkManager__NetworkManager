@@ -1462,7 +1462,6 @@ nm_setting_ip_config_next_valid_dns_option (NMSettingIPConfig *setting, guint i)
 	g_return_val_if_fail (NM_IS_SETTING_IP_CONFIG (setting), -1);
 
 	priv = NM_SETTING_IP_CONFIG_GET_PRIVATE (setting);
-	g_return_val_if_fail (i < priv->dns_options->len, -1);
 
 	for (; i < priv->dns_options->len; i++) {
 		if (_nm_utils_dns_option_validate (priv->dns_options->pdata[i], NULL, NULL,
