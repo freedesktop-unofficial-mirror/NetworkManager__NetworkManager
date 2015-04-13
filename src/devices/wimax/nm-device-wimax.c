@@ -232,37 +232,6 @@ get_nsp_by_path (NMDeviceWimax *self, const char *path)
 	return NULL;
 }
 
-static gboolean
-update_availability (NMDeviceWimax *self, gboolean old_available)
-{
-	NMDevice *device = NM_DEVICE (self);
-	NMDeviceState state;
-	gboolean new_available, changed = FALSE;
-
-	new_available = nm_device_is_available (device, NM_DEVICE_CHECK_DEV_AVAILABLE_NONE);
-	if (new_available == old_available)
-		return FALSE;
-
-	state = nm_device_get_state (device);
-	if (state == NM_DEVICE_STATE_UNAVAILABLE) {
-		if (new_available == TRUE) {
-			nm_device_state_changed (device,
-			                         NM_DEVICE_STATE_DISCONNECTED,
-			                         NM_DEVICE_STATE_REASON_NONE);
-			changed = TRUE;
-		}
-	} else if (state >= NM_DEVICE_STATE_DISCONNECTED) {
-		if (new_available == FALSE) {
-			nm_device_state_changed (device,
-			                         NM_DEVICE_STATE_UNAVAILABLE,
-			                         NM_DEVICE_STATE_REASON_NONE);
-			changed = TRUE;
-		}
-	}
-
-	return changed;
-}
-
 /* NMDeviceInterface interface */
 
 static void
@@ -270,7 +239,6 @@ set_enabled (NMDevice *device, gboolean enabled)
 {
 	NMDeviceWimax *self = NM_DEVICE_WIMAX (device);
 	NMDeviceWimaxPrivate *priv = NM_DEVICE_WIMAX_GET_PRIVATE (self);
-	gboolean old_available;
 	int ret;
 	const char *iface;
 
@@ -281,7 +249,6 @@ set_enabled (NMDevice *device, gboolean enabled)
 	if (priv->enabled == enabled)
 		return;
 
-	old_available = nm_device_is_available (NM_DEVICE (device), NM_DEVICE_CHECK_DEV_AVAILABLE_NONE);
 	priv->enabled = enabled;
 
 	nm_log_dbg (LOGD_WIMAX, "(%s): radio now %s",
@@ -297,7 +264,9 @@ set_enabled (NMDevice *device, gboolean enabled)
 		}
 	}
 
-	update_availability (self, old_available);
+	nm_device_queue_recheck_available (NM_DEVICE (self),
+	                                   NM_DEVICE_STATE_REASON_NONE,
+	                                   NM_DEVICE_STATE_REASON_NONE);
 }
 
 /* NMDevice methods */
@@ -692,7 +661,6 @@ wmx_state_change_cb (struct wmxsdk *wmxsdk,
 	NMDeviceWimaxPrivate *priv = NM_DEVICE_WIMAX_GET_PRIVATE (self);
 	NMDeviceState state;
 	const char *iface;
-	gboolean old_available = FALSE;
 	const char *nsp_name = NULL;
 
 	iface = nm_device_get_iface (NM_DEVICE (self));
@@ -707,7 +675,6 @@ wmx_state_change_cb (struct wmxsdk *wmxsdk,
 		return;
 
 	state = nm_device_get_state (NM_DEVICE (self));
-	old_available = nm_device_is_available (NM_DEVICE (self), NM_DEVICE_CHECK_DEV_AVAILABLE_NONE);
 
 	priv->status = new_status;
 	if (priv->current_nsp)
@@ -720,8 +687,10 @@ wmx_state_change_cb (struct wmxsdk *wmxsdk,
 	case WIMAX_API_DEVICE_STATUS_RF_OFF_SW:
 		if (priv->wimaxd_enabled) {
 			priv->wimaxd_enabled = FALSE;
-			if (update_availability (self, old_available))
-				return;
+			nm_device_queue_recheck_available (NM_DEVICE (self),
+			                                   NM_DEVICE_STATE_REASON_NONE,
+			                                   NM_DEVICE_STATE_REASON_NONE);
+			return;
 		}
 		break;
 	case WIMAX_API_DEVICE_STATUS_Connecting:
@@ -734,8 +703,10 @@ wmx_state_change_cb (struct wmxsdk *wmxsdk,
 	case WIMAX_API_DEVICE_STATUS_Scanning:
 		if (priv->wimaxd_enabled == FALSE) {
 			priv->wimaxd_enabled = TRUE;
-			if (update_availability (self, old_available))
-				return;
+			nm_device_queue_recheck_available (NM_DEVICE (self),
+			                                   NM_DEVICE_STATE_REASON_NONE,
+			                                   NM_DEVICE_STATE_REASON_NONE);
+			return;
 		}
 		break;
 	default:
@@ -1148,10 +1119,11 @@ static gboolean
 sdk_action_defer_cb (gpointer user_data)
 {
 	NMDeviceWimax *self = NM_DEVICE_WIMAX (user_data);
-	gboolean old_available = nm_device_is_available (NM_DEVICE (self), NM_DEVICE_CHECK_DEV_AVAILABLE_NONE);
 
 	NM_DEVICE_WIMAX_GET_PRIVATE (self)->sdk_action_defer_id = 0;
-	update_availability (self, old_available);
+	nm_device_queue_recheck_available (NM_DEVICE (self),
+	                                   NM_DEVICE_STATE_REASON_NONE,
+	                                   NM_DEVICE_STATE_REASON_NONE);
 	return FALSE;
 }
 
