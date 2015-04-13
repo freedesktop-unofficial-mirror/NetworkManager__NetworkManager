@@ -86,6 +86,7 @@ struct _NMPlatformLink {
 	const char *type_name;
 	const char *udi;
 	const char *driver;
+	gboolean initialized;
 	int master;
 	int parent;
 	gboolean up;
