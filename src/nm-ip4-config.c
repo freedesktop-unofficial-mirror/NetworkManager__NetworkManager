@@ -390,8 +390,11 @@ nm_ip4_config_merge_setting (NMIP4Config *config, NMSettingIPConfig *setting, gu
 	for (i = 0; i < nsearches; i++)
 		nm_ip4_config_add_search (config, nm_setting_ip_config_get_dns_search (setting, i));
 
-	for (i = 0; (i = nm_setting_ip_config_next_valid_dns_option (setting, i)) >= 0; i++)
+	i = 0;
+	while ((i = nm_setting_ip_config_next_valid_dns_option (setting, i)) >= 0) {
 		nm_ip4_config_add_dns_option (config, nm_setting_ip_config_get_dns_option (setting, i));
+		i++;
+	}
 
 	g_object_thaw_notify (G_OBJECT (config));
 }
