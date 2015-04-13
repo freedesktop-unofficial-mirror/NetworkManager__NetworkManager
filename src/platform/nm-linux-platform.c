@@ -413,35 +413,6 @@ udev_get_driver (GUdevDevice *device, int ifindex)
 	return driver;
 }
 
-static NMLinkType
-udev_detect_link_type_from_device (GUdevDevice *udev_device, const char *ifname, int arptype, const char **out_name)
-{
-	const char *prop, *sysfs_path;
-
-	g_assert (ifname);
-
-	if (!udev_device)
-		return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
-
-	if (   g_udev_device_get_property (udev_device, "ID_NM_OLPC_MESH")
-	    || g_udev_device_get_sysfs_attr (udev_device, "anycast_mask"))
-		return_type (NM_LINK_TYPE_OLPC_MESH, "olpc-mesh");
-
-	prop = g_udev_device_get_property (udev_device, "DEVTYPE");
-	sysfs_path = g_udev_device_get_sysfs_path (udev_device);
-	if (wifi_utils_is_wifi (ifname, sysfs_path, prop))
-		return_type (NM_LINK_TYPE_WIFI, "wifi");
-	else if (g_strcmp0 (prop, "wwan") == 0)
-		return_type (NM_LINK_TYPE_WWAN_ETHERNET, "wwan");
-	else if (g_strcmp0 (prop, "wimax") == 0)
-		return_type (NM_LINK_TYPE_WIMAX, "wimax");
-
-	if (arptype == ARPHRD_ETHER)
-		return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
-
-	return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
-}
-
 /******************************************************************
  * NMPlatform types and functions
  ******************************************************************/
@@ -856,8 +827,30 @@ link_is_announceable (NMPlatform *platform, struct rtnl_link *rtnllink)
 	return FALSE;
 }
 
+#define DEVTYPE_PREFIX "DEVTYPE="
+
+static char *
+read_devtype (const char *sysfs_path)
+{
+	gs_free char *uevent = g_strdup_printf ("%s/uevent", sysfs_path);
+	gs_free char *contents = NULL;
+	gs_strfreev char **lines = NULL;
+	char **iter;
+	char *devtype = NULL;
+
+	if (!g_file_get_contents (uevent, &contents, NULL, NULL))
+		return NULL;
+	lines = g_strsplit_set (contents, "\r\n", 0);
+	for (iter = lines; iter && *iter; iter++) {
+		if (strncmp (*iter, DEVTYPE_PREFIX, STRLEN (DEVTYPE_PREFIX)) == 0)
+			return *iter + STRLEN (DEVTYPE_PREFIX);
+	}
+
+	return devtype;
+}
+
 static NMLinkType
-link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char **out_name)
+link_extract_type (struct rtnl_link *rtnllink, const char **out_name)
 {
 	const char *type;
 
@@ -870,7 +863,9 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 		int arptype = rtnl_link_get_arptype (rtnllink);
 		const char *driver;
 		const char *ifname;
-		GUdevDevice *udev_device = NULL;
+		gs_free char *anycast_mask = NULL;
+		gs_free char *sysfs_path = NULL;
+		gs_free char *devtype = NULL;
 
 		if (arptype == ARPHRD_LOOPBACK)
 			return_type (NM_LINK_TYPE_LOOPBACK, "loopback");
@@ -894,14 +889,25 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 		if (!g_strcmp0 (driver, "openvswitch"))
 			return_type (NM_LINK_TYPE_OPENVSWITCH, "openvswitch");
 
-		if (platform) {
-			udev_device = g_hash_table_lookup (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->udev_devices,
-			                                   GINT_TO_POINTER (rtnl_link_get_ifindex (rtnllink)));
+		sysfs_path = g_strdup_printf ("/sys/class/net/%s", ifname);
+		anycast_mask = g_strdup_printf ("%s/anycast_mask", sysfs_path);
+		if (g_file_test (anycast_mask, G_FILE_TEST_EXISTS))
+			return_type (NM_LINK_TYPE_OLPC_MESH, "olpc-mesh");
+
+		devtype = read_devtype (sysfs_path);
+		if (devtype) {
+			if (wifi_utils_is_wifi (ifname, sysfs_path, devtype))
+				return_type (NM_LINK_TYPE_WIFI, "wifi");
+			else if (g_strcmp0 (devtype, "wwan") == 0)
+				return_type (NM_LINK_TYPE_WWAN_ETHERNET, "wwan");
+			else if (g_strcmp0 (devtype, "wimax") == 0)
+				return_type (NM_LINK_TYPE_WIMAX, "wimax");
 		}
-		return udev_detect_link_type_from_device (udev_device,
-		                                          ifname,
-		                                          arptype,
-		                                          out_name);
+
+		if (arptype == ARPHRD_ETHER)
+			return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
+
+		return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
 	} else if (!strcmp (type, "dummy"))
 		return_type (NM_LINK_TYPE_DUMMY, "dummy");
 	else if (!strcmp (type, "gre"))
@@ -966,7 +972,7 @@ init_link (NMPlatform *platform, NMPlatformLink *info, struct rtnl_link *rtnllin
 		g_strlcpy (info->name, name, sizeof (info->name));
 	else
 		info->name[0] = '\0';
-	info->type = link_extract_type (platform, rtnllink, &info->type_name);
+	info->type = link_extract_type (rtnllink, &info->type_name);
 	info->up = !!(rtnl_link_get_flags (rtnllink) & IFF_UP);
 	info->connected = !!(rtnl_link_get_flags (rtnllink) & IFF_LOWER_UP);
 	info->arp = !(rtnl_link_get_flags (rtnllink) & IFF_NOARP);
@@ -2397,7 +2403,7 @@ link_get_type (NMPlatform *platform, int ifindex)
 {
 	auto_nl_object struct rtnl_link *rtnllink = link_get (platform, ifindex);
 
-	return link_extract_type (platform, rtnllink, NULL);
+	return link_extract_type (rtnllink, NULL);
 }
 
 static const char *
@@ -2406,7 +2412,7 @@ link_get_type_name (NMPlatform *platform, int ifindex)
 	auto_nl_object struct rtnl_link *rtnllink = link_get (platform, ifindex);
 	const char *type;
 
-	link_extract_type (platform, rtnllink, &type);
+	link_extract_type (rtnllink, &type);
 	return type;
 }
 
