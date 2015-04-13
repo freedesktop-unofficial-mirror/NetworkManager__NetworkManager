@@ -175,6 +175,7 @@ typedef struct {
 typedef struct {
 	gboolean in_state_changed;
 	gboolean initialized;
+	gboolean platform_link_initialized;
 
 	NMDeviceState state;
 	NMDeviceStateReason state_reason;
@@ -1061,6 +1062,9 @@ nm_device_finish_init (NMDevice *self)
 	if (priv->master)
 		nm_device_enslave_slave (priv->master, self, NULL);
 
+	if (priv->ifindex > 0 && priv->platform_link_initialized)
+		nm_device_set_initial_unmanaged_flag (self, NM_UNMANAGED_PLATFORM_INIT, FALSE);
+
 	priv->initialized = TRUE;
 }
 
@@ -1261,6 +1265,13 @@ device_link_changed (NMDevice *self, NMPlatformLink *info)
 		g_object_notify (G_OBJECT (self), NM_DEVICE_UDI);
 	}
 
+	if (info->driver && g_strcmp0 (info->driver, priv->driver)) {
+		/* Update driver to what udev gives us */
+		g_free (priv->driver);
+		priv->driver = g_strdup (info->driver);
+		g_object_notify (G_OBJECT (self), NM_DEVICE_DRIVER);
+	}
+
 	/* Update MTU if it has changed. */
 	if (priv->mtu != info->mtu) {
 		priv->mtu = info->mtu;
@@ -1352,6 +1363,14 @@ device_link_changed (NMDevice *self, NMPlatformLink *info)
 				                         NM_DEVICE_STATE_REASON_USER_REQUESTED);
 			}
 		}
+	}
+
+	if (priv->ifindex > 0 && !priv->platform_link_initialized && info->initialized) {
+		priv->platform_link_initialized = TRUE;
+		nm_device_set_unmanaged (self,
+		                         NM_UNMANAGED_PLATFORM_INIT,
+		                         FALSE,
+		                         NM_DEVICE_STATE_REASON_NOW_MANAGED);
 	}
 }
 
@@ -8711,6 +8730,13 @@ set_property (GObject *object, guint prop_id,
 			priv->up = platform_device->up;
 			g_free (priv->driver);
 			priv->driver = g_strdup (platform_device->driver);
+			priv->platform_link_initialized = platform_device->initialized;
+			/* Cannot manage device until the platform has fully initialized its link */
+			if (priv->ifindex > 0) {
+				nm_device_set_initial_unmanaged_flag (self,
+				                                      NM_UNMANAGED_PLATFORM_INIT,
+				                                      !platform_device->initialized);
+			}
 		}
 		break;
 	case PROP_UDI:
