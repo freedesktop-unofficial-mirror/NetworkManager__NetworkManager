@@ -834,57 +834,54 @@ type_to_string (NMLinkType type)
 	g_return_val_if_reached (NULL);
 }
 
-#define DEVTYPE_PREFIX "DEVTYPE="
-
-static char *
-read_devtype (const char *sysfs_path)
-{
-	gs_free char *uevent = g_strdup_printf ("%s/uevent", sysfs_path);
-	char *contents = NULL;
-	char *cont, *end;
-
-	if (!g_file_get_contents (uevent, &contents, NULL, NULL))
-		return NULL;
-	for (cont = contents; cont; cont = end) {
-		end = strpbrk (cont, "\r\n");
-		if (end)
-			*end++ = '\0';
-		if (strncmp (cont, DEVTYPE_PREFIX, STRLEN (DEVTYPE_PREFIX)) == 0) {
-			cont += STRLEN (DEVTYPE_PREFIX);
-			memmove (contents, cont, strlen (cont) + 1);
-			return contents;
-		}
-	}
-	g_free (contents);
-	return NULL;
-}
-
 static NMLinkType
 link_extract_type (struct rtnl_link *rtnllink, const char **out_name)
 {
-	const char *type;
+	const char *type, *ifname;
+	int i, arptype;
 
 	if (!rtnllink)
 		return_type (NM_LINK_TYPE_NONE, NULL);
 
 	type = rtnl_link_get_type (rtnllink);
+	if (type) {
+		for (i = 0; i < G_N_ELEMENTS (linktypes); i++) {
+			if (g_strcmp0 (type, linktypes[i].rtnl_type) == 0)
+				return_type (linktypes[i].nm_type, type);
+		}
 
-	if (!type) {
-		int arptype = rtnl_link_get_arptype (rtnllink);
-		const char *driver;
-		const char *ifname;
-		gs_free char *anycast_mask = NULL;
+		if (!strcmp (type, "tun")) {
+			NMPlatformTunProperties props;
+			guint flags;
+
+			if (nm_platform_tun_get_properties (rtnl_link_get_ifindex (rtnllink), &props)) {
+				if (!g_strcmp0 (props.mode, "tap"))
+					return_type (NM_LINK_TYPE_TAP, "tap");
+				if (!g_strcmp0 (props.mode, "tun"))
+					return_type (NM_LINK_TYPE_TUN, "tun");
+			}
+			flags = rtnl_link_get_flags (rtnllink);
+
+			nm_log_dbg (LOGD_PLATFORM, "Failed to read tun properties for interface %d (link flags: %X)",
+			            rtnl_link_get_ifindex (rtnllink), flags);
+
+			/* try guessing the type using the link flags instead... */
+			if (flags & IFF_POINTOPOINT)
+				return_type (NM_LINK_TYPE_TUN, "tun");
+			return_type (NM_LINK_TYPE_TAP, "tap");
+		}
+	}
+
+	arptype = rtnl_link_get_arptype (rtnllink);
+	if (arptype == ARPHRD_LOOPBACK)
+		return_type (NM_LINK_TYPE_LOOPBACK, "loopback");
+	else if (arptype == ARPHRD_INFINIBAND)
+		return_type (NM_LINK_TYPE_INFINIBAND, "infiniband");
+
+	ifname = rtnl_link_get_name (rtnllink);
+	if (ifname) {
 		gs_free char *sysfs_path = NULL;
-		gs_free char *devtype = NULL;
-
-		if (arptype == ARPHRD_LOOPBACK)
-			return_type (NM_LINK_TYPE_LOOPBACK, "loopback");
-		else if (arptype == ARPHRD_INFINIBAND)
-			return_type (NM_LINK_TYPE_INFINIBAND, "infiniband");
-
-		ifname = rtnl_link_get_name (rtnllink);
-		if (!ifname)
-			return_type (NM_LINK_TYPE_UNKNOWN, type);
+		gs_free char *anycast_mask = NULL;
 
 		if (arptype == 256) {
 			/* Some s390 CTC-type devices report 256 for the encapsulation type
@@ -895,8 +892,8 @@ link_extract_type (struct rtnl_link *rtnllink, const char **out_name)
 				return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
 		}
 
-		driver = ethtool_get_driver (ifname);
-		if (!g_strcmp0 (driver, "openvswitch"))
+		/* Fallback OVS detection for kernel <= 3.16 */
+		if (!g_strcmp0 (ethtool_get_driver (ifname), "openvswitch"))
 			return_type (NM_LINK_TYPE_OPENVSWITCH, "openvswitch");
 
 		sysfs_path = g_strdup_printf ("/sys/class/net/%s", ifname);
@@ -904,65 +901,20 @@ link_extract_type (struct rtnl_link *rtnllink, const char **out_name)
 		if (g_file_test (anycast_mask, G_FILE_TEST_EXISTS))
 			return_type (NM_LINK_TYPE_OLPC_MESH, "olpc-mesh");
 
-		devtype = read_devtype (sysfs_path);
-		if (devtype) {
-			if (wifi_utils_is_wifi (ifname, sysfs_path, devtype))
-				return_type (NM_LINK_TYPE_WIFI, "wifi");
-			else if (g_strcmp0 (devtype, "wwan") == 0)
-				return_type (NM_LINK_TYPE_WWAN_ETHERNET, "wwan");
-			else if (g_strcmp0 (devtype, "wimax") == 0)
-				return_type (NM_LINK_TYPE_WIMAX, "wimax");
-		}
+		/* Fallback for drivers that don't call SET_NETDEV_DEVTYPE() */
+		if (wifi_utils_is_wifi (ifname, sysfs_path))
+			return_type (NM_LINK_TYPE_WIFI, "wifi");
 
-		if (arptype == ARPHRD_ETHER)
+		/* Standard wired ethernet interfaces don't report an rtnl_link_type, so
+		 * only allow fallback to Ethernet if no type is given.  This should
+		 * prevent future virtual network drivers from being treated as Ethernet
+		 * when they should be Generic instead.
+		 */
+		if (arptype == ARPHRD_ETHER && !type)
 			return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
+	}
 
-		return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
-	} else if (!strcmp (type, "dummy"))
-		return_type (NM_LINK_TYPE_DUMMY, "dummy");
-	else if (!strcmp (type, "gre"))
-		return_type (NM_LINK_TYPE_GRE, "gre");
-	else if (!strcmp (type, "gretap"))
-		return_type (NM_LINK_TYPE_GRETAP, "gretap");
-	else if (!strcmp (type, "ifb"))
-		return_type (NM_LINK_TYPE_IFB, "ifb");
-	else if (!strcmp (type, "macvlan"))
-		return_type (NM_LINK_TYPE_MACVLAN, "macvlan");
-	else if (!strcmp (type, "macvtap"))
-		return_type (NM_LINK_TYPE_MACVTAP, "macvtap");
-	else if (!strcmp (type, "tun")) {
-		NMPlatformTunProperties props;
-		guint flags;
-
-		if (nm_platform_tun_get_properties (rtnl_link_get_ifindex (rtnllink), &props)) {
-			if (!g_strcmp0 (props.mode, "tap"))
-				return_type (NM_LINK_TYPE_TAP, "tap");
-			if (!g_strcmp0 (props.mode, "tun"))
-				return_type (NM_LINK_TYPE_TUN, "tun");
-		}
-		flags = rtnl_link_get_flags (rtnllink);
-
-		nm_log_dbg (LOGD_PLATFORM, "Failed to read tun properties for interface %d (link flags: %X)",
-		                           rtnl_link_get_ifindex (rtnllink), flags);
-
-		/* try guessing the type using the link flags instead... */
-		if (flags & IFF_POINTOPOINT)
-			return_type (NM_LINK_TYPE_TUN, "tun");
-		return_type (NM_LINK_TYPE_TAP, "tap");
-	} else if (!strcmp (type, "veth"))
-		return_type (NM_LINK_TYPE_VETH, "veth");
-	else if (!strcmp (type, "vlan"))
-		return_type (NM_LINK_TYPE_VLAN, "vlan");
-	else if (!strcmp (type, "vxlan"))
-		return_type (NM_LINK_TYPE_VXLAN, "vxlan");
-	else if (!strcmp (type, "bridge"))
-		return_type (NM_LINK_TYPE_BRIDGE, "bridge");
-	else if (!strcmp (type, "bond"))
-		return_type (NM_LINK_TYPE_BOND, "bond");
-	else if (!strcmp (type, "team"))
-		return_type (NM_LINK_TYPE_TEAM, "team");
-
-	return_type (NM_LINK_TYPE_UNKNOWN, type);
+	return_type (NM_LINK_TYPE_UNKNOWN, type ? type : "unknown");
 }
 
 static gboolean
