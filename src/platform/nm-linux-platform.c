@@ -504,7 +504,7 @@ udev_detect_link_type_from_device (GUdevDevice *udev_device, const char *ifname,
 	g_assert (ifname);
 
 	if (!udev_device)
-		return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
+		return_type (NM_LINK_TYPE_UNKNOWN_UDEV, "unknown");
 
 	if (   g_udev_device_get_property (udev_device, "ID_NM_OLPC_MESH")
 	    || g_udev_device_get_sysfs_attr (udev_device, "anycast_mask"))
@@ -522,7 +522,7 @@ udev_detect_link_type_from_device (GUdevDevice *udev_device, const char *ifname,
 	if (arptype == ARPHRD_ETHER)
 		return_type (NM_LINK_TYPE_ETHERNET, "ethernet");
 
-	return_type (NM_LINK_TYPE_UNKNOWN, "unknown");
+	return_type (NM_LINK_TYPE_UNKNOWN_UDEV, "unknown");
 }
 
 /******************************************************************
@@ -930,7 +930,7 @@ link_is_announceable (NMPlatform *platform, struct rtnl_link *rtnllink)
 }
 
 static NMLinkType
-link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char **out_name)
+link_extract_type (NMPlatform *platform, gboolean return_unknown_udev, struct rtnl_link *rtnllink, const char **out_name)
 {
 	const char *type;
 
@@ -944,6 +944,7 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 		const char *driver;
 		const char *ifname;
 		GUdevDevice *udev_device = NULL;
+		NMLinkType link_type;
 
 		if (arptype == ARPHRD_LOOPBACK)
 			return_type (NM_LINK_TYPE_LOOPBACK, "loopback");
@@ -971,10 +972,14 @@ link_extract_type (NMPlatform *platform, struct rtnl_link *rtnllink, const char 
 			udev_device = g_hash_table_lookup (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->udev_devices,
 			                                   GINT_TO_POINTER (rtnl_link_get_ifindex (rtnllink)));
 		}
-		return udev_detect_link_type_from_device (udev_device,
-		                                          ifname,
-		                                          arptype,
-		                                          out_name);
+		link_type = udev_detect_link_type_from_device (udev_device,
+		                                               ifname,
+		                                               arptype,
+		                                               out_name);
+
+		if (return_unknown_udev || link_type != NM_LINK_TYPE_UNKNOWN_UDEV)
+			return link_type;
+		return NM_LINK_TYPE_UNKNOWN;
 	} else if (!strcmp (type, "dummy"))
 		return_type (NM_LINK_TYPE_DUMMY, "dummy");
 	else if (!strcmp (type, "gre"))
@@ -1039,7 +1044,7 @@ init_link (NMPlatform *platform, NMPlatformLink *info, struct rtnl_link *rtnllin
 		g_strlcpy (info->name, name, sizeof (info->name));
 	else
 		info->name[0] = '\0';
-	info->type = link_extract_type (platform, rtnllink, &info->type_name);
+	info->type = link_extract_type (platform, FALSE, rtnllink, &info->type_name);
 	info->up = !!(rtnl_link_get_flags (rtnllink) & IFF_UP);
 	info->connected = !!(rtnl_link_get_flags (rtnllink) & IFF_LOWER_UP);
 	info->arp = !(rtnl_link_get_flags (rtnllink) & IFF_NOARP);
@@ -2466,7 +2471,7 @@ link_get_type (NMPlatform *platform, int ifindex)
 {
 	auto_nl_object struct rtnl_link *rtnllink = link_get (platform, ifindex);
 
-	return link_extract_type (platform, rtnllink, NULL);
+	return link_extract_type (platform, FALSE, rtnllink, NULL);
 }
 
 static const char *
@@ -2475,7 +2480,7 @@ link_get_type_name (NMPlatform *platform, int ifindex)
 	auto_nl_object struct rtnl_link *rtnllink = link_get (platform, ifindex);
 	const char *type;
 
-	link_extract_type (platform, rtnllink, &type);
+	link_extract_type (platform, FALSE, rtnllink, &type);
 	return type;
 }
 

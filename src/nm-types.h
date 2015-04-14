@@ -79,6 +79,7 @@ typedef enum {
 
 	/* Unknown type  */
 	NM_LINK_TYPE_UNKNOWN,
+	NM_LINK_TYPE_UNKNOWN_UDEV,
 
 	/* Hardware types */
 	NM_LINK_TYPE_ETHERNET,
