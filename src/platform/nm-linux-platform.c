@@ -15,7 +15,7 @@
  * with this program; if not, write to the Free Software Foundation, Inc.,
  * 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  *
- * Copyright (C) 2012-2013 Red Hat, Inc.
+ * Copyright (C) 2012-2015 Red Hat, Inc.
  */
 #include "config.h"
 
@@ -563,7 +563,7 @@ nm_linux_platform_setup (void)
 
 /******************************************************************/
 
-static ObjectType
+ObjectType
 _nlo_get_object_type (const struct nl_object *object)
 {
 	const char *type_str;
@@ -1055,6 +1055,41 @@ init_link (NMPlatform *platform, NMPlatformLink *info, struct rtnl_link *rtnllin
 	return TRUE;
 }
 
+gboolean
+_nmp_vt_cmd_plobj_init_from_nl_link (NMPlatformObject *_obj, const struct nl_object *_nlo, gboolean id_only)
+{
+	NMPlatformLink *obj = (NMPlatformLink *) _obj;
+	NMPObjectLink *obj_priv = (NMPObjectLink *) _obj;
+	struct rtnl_link *nlo = (struct rtnl_link *) _nlo;
+	const char *name;
+
+	obj->ifindex = rtnl_link_get_ifindex (nlo);
+
+	if (id_only)
+		return TRUE;
+
+	name = rtnl_link_get_name (nlo);
+	if (name)
+		g_strlcpy (obj->name, name, sizeof (obj->name));
+	obj->type = link_extract_type (NULL, TRUE, nlo, &obj->type_name);
+	obj->up = !!(rtnl_link_get_flags (nlo) & IFF_UP);
+	obj->connected = !!(rtnl_link_get_flags (nlo) & IFF_LOWER_UP);
+	obj->arp = !(rtnl_link_get_flags (nlo) & IFF_NOARP);
+	obj->master = rtnl_link_get_master (nlo);
+	obj->parent = rtnl_link_get_link (nlo);
+	obj->mtu = rtnl_link_get_mtu (nlo);
+
+	obj_priv->netlink.is_in_netlink = TRUE;
+	obj_priv->netlink.connected_native = obj->connected;
+	if (obj->type == NM_LINK_TYPE_UNKNOWN_UDEV) {
+		obj->type = NM_LINK_TYPE_UNKNOWN;
+		obj_priv->netlink.link_type_unknown_udev = TRUE;
+	}
+	obj_priv->netlink.arptype = rtnl_link_get_arptype (nlo);
+	obj_priv->netlink.rtnl_link_type = g_intern_string (rtnl_link_get_type (nlo));
+	return TRUE;
+}
+
 /* Hack: Empty bridges and bonds have IFF_LOWER_UP flag and therefore they break
  * the carrier detection. This hack makes nm-platform think they don't have the
  * IFF_LOWER_UP flag. This seems to also apply to bonds (specifically) with all
@@ -1238,6 +1273,63 @@ _init_ip_address_lifetime (NMPlatformIPAddress *address, const struct rtnl_addr 
 	address->preferred = _get_remaining_time (address->timestamp, a_preferred);
 }
 
+static guint32
+_extend_lifetime (guint32 lifetime, guint32 seconds)
+{
+	guint64 v;
+
+	if (   lifetime == NM_PLATFORM_LIFETIME_PERMANENT
+	    || seconds == 0)
+		return lifetime;
+
+	v = (guint64) lifetime + (guint64) seconds;
+	return MIN (v, NM_PLATFORM_LIFETIME_PERMANENT - 1);
+}
+
+/* The rtnl_addr object contains relative lifetimes @valid and @preferred
+ * that count in seconds, starting from the moment when the kernel constructed
+ * the netlink message.
+ *
+ * There is also a field rtnl_addr_last_update_time(), which is the absolute
+ * time in 1/100th of a second of clock_gettime (CLOCK_MONOTONIC) when the address
+ * was modified (wrapping every 497 days).
+ * Immediately at the time when the address was last modified, #NOW and @last_update_time
+ * are the same, so (only) in that case @valid and @preferred are anchored at @last_update_time.
+ * However, this is not true in general. As time goes by, whenever kernel sends a new address
+ * via netlink, the lifetimes keep counting down.
+ **/
+static void
+_nlo_rtnl_addr_get_lifetimes (const struct rtnl_addr *rtnladdr,
+                              guint32 *out_timestamp,
+                              guint32 *out_lifetime,
+                              guint32 *out_preferred)
+{
+	guint32 timestamp = 0, now;
+	guint32 lifetime = rtnl_addr_get_valid_lifetime ((struct rtnl_addr *) rtnladdr);
+	guint32 preferred = rtnl_addr_get_preferred_lifetime ((struct rtnl_addr *) rtnladdr);
+
+	if (   lifetime != NM_PLATFORM_LIFETIME_PERMANENT
+	    || preferred != NM_PLATFORM_LIFETIME_PERMANENT) {
+		if (preferred > lifetime)
+			preferred = lifetime;
+		timestamp = _rtnl_addr_last_update_time_to_nm (rtnladdr, &now);
+
+		if (now == 0) {
+			/* strange. failed to detect the last-update time and assumes a timestamp of 1. */
+			now = nm_utils_get_monotonic_timestamp_s ();
+		}
+		if (timestamp < now) {
+			guint32 diff = now - timestamp;
+
+			lifetime = _extend_lifetime (lifetime, diff);
+			preferred = _extend_lifetime (preferred, diff);
+		}
+	}
+	*out_timestamp = timestamp;
+	*out_lifetime = lifetime;
+	*out_preferred = preferred;
+}
+
 static gboolean
 init_ip4_address (NMPlatformIP4Address *address, struct rtnl_addr *rtnladdr)
 {
@@ -1273,6 +1365,44 @@ init_ip4_address (NMPlatformIP4Address *address, struct rtnl_addr *rtnladdr)
 	return TRUE;
 }
 
+gboolean
+_nmp_vt_cmd_plobj_init_from_nl_ip4_address (NMPlatformObject *_obj, const struct nl_object *_nlo, gboolean id_only)
+{
+	NMPlatformIP4Address *obj = (NMPlatformIP4Address *) _obj;
+	struct rtnl_addr *nlo = (struct rtnl_addr *) _nlo;
+	struct nl_addr *nladdr = rtnl_addr_get_local (nlo);
+	struct nl_addr *nlpeer = rtnl_addr_get_peer (nlo);
+	const char *label;
+
+	if (!nladdr || nl_addr_get_len (nladdr) != sizeof (obj->address))
+		g_return_val_if_reached (FALSE);
+
+	obj->ifindex = rtnl_addr_get_ifindex (nlo);
+	obj->plen = rtnl_addr_get_prefixlen (nlo);
+	memcpy (&obj->address, nl_addr_get_binary_addr (nladdr), sizeof (obj->address));
+
+	if (id_only)
+		return TRUE;
+
+	obj->source = NM_IP_CONFIG_SOURCE_KERNEL;
+	_nlo_rtnl_addr_get_lifetimes (nlo,
+	                              &obj->timestamp,
+	                              &obj->lifetime,
+	                              &obj->preferred);
+	if (nlpeer) {
+		if (nl_addr_get_len (nlpeer) != sizeof (obj->peer_address))
+			g_warn_if_reached ();
+		else
+			memcpy (&obj->peer_address, nl_addr_get_binary_addr (nlpeer), sizeof (obj->peer_address));
+	}
+	label = rtnl_addr_get_label (nlo);
+	/* Check for ':'; we're only interested in labels used as interface aliases */
+	if (label && strchr (label, ':'))
+		g_strlcpy (obj->label, label, sizeof (obj->label));
+
+	return TRUE;
+}
+
 static gboolean
 init_ip6_address (NMPlatformIP6Address *address, struct rtnl_addr *rtnladdr)
 {
@@ -1297,6 +1427,41 @@ init_ip6_address (NMPlatformIP6Address *address, struct rtnl_addr *rtnladdr)
 			return FALSE;
 		}
 		memcpy (&address->peer_address, nl_addr_get_binary_addr (nlpeer), sizeof (address->peer_address));
+	}
+
+	return TRUE;
+}
+
+gboolean
+_nmp_vt_cmd_plobj_init_from_nl_ip6_address (NMPlatformObject *_obj, const struct nl_object *_nlo, gboolean id_only)
+{
+	NMPlatformIP6Address *obj = (NMPlatformIP6Address *) _obj;
+	struct rtnl_addr *nlo = (struct rtnl_addr *) _nlo;
+	struct nl_addr *nladdr = rtnl_addr_get_local (nlo);
+	struct nl_addr *nlpeer = rtnl_addr_get_peer (nlo);
+
+	if (!nladdr || nl_addr_get_len (nladdr) != sizeof (obj->address))
+		g_return_val_if_reached (FALSE);
+
+	obj->ifindex = rtnl_addr_get_ifindex (nlo);
+	obj->plen = rtnl_addr_get_prefixlen (nlo);
+	memcpy (&obj->address, nl_addr_get_binary_addr (nladdr), sizeof (obj->address));
+
+	if (id_only)
+		return TRUE;
+
+	obj->source = NM_IP_CONFIG_SOURCE_KERNEL;
+	_nlo_rtnl_addr_get_lifetimes (nlo,
+	                              &obj->timestamp,
+	                              &obj->lifetime,
+	                              &obj->preferred);
+	obj->flags = rtnl_addr_get_flags (nlo);
+
+	if (nlpeer) {
+		if (nl_addr_get_len (nlpeer) != sizeof (obj->peer_address))
+			g_warn_if_reached ();
+		else
+			memcpy (&obj->peer_address, nl_addr_get_binary_addr (nlpeer), sizeof (obj->peer_address));
 	}
 
 	return TRUE;
@@ -1393,6 +1558,52 @@ init_ip4_route (NMPlatformIP4Route *route, struct rtnl_route *rtnlroute)
 	return TRUE;
 }
 
+gboolean
+_nmp_vt_cmd_plobj_init_from_nl_ip4_route (NMPlatformObject *_obj, const struct nl_object *_nlo, gboolean id_only)
+{
+	NMPlatformIP4Route *obj = (NMPlatformIP4Route *) _obj;
+	struct rtnl_route *nlo = (struct rtnl_route *) _nlo;
+	struct nl_addr *dst, *gw;
+	struct rtnl_nexthop *nexthop;
+
+	if (rtnl_route_get_type (nlo) != RTN_UNICAST ||
+	    rtnl_route_get_table (nlo) != RT_TABLE_MAIN ||
+	    rtnl_route_get_nnexthops (nlo) != 1)
+		return FALSE;
+
+	nexthop = rtnl_route_nexthop_n (nlo, 0);
+	if (!nexthop)
+		g_return_val_if_reached (FALSE);
+
+	dst = rtnl_route_get_dst (nlo);
+	if (!dst)
+		g_return_val_if_reached (FALSE);
+
+	if (nl_addr_get_len (dst)) {
+		if (nl_addr_get_len (dst) != sizeof (obj->network))
+			g_return_val_if_reached (FALSE);
+		memcpy (&obj->network, nl_addr_get_binary_addr (dst), sizeof (obj->network));
+	}
+	obj->ifindex = rtnl_route_nh_get_ifindex (nexthop);
+	obj->plen = nl_addr_get_prefixlen (dst);
+	obj->metric = rtnl_route_get_priority (nlo);
+
+	gw = rtnl_route_nh_get_gateway (nexthop);
+	if (gw) {
+		if (nl_addr_get_len (gw) != sizeof (obj->gateway))
+			g_warn_if_reached ();
+		else
+			memcpy (&obj->gateway, nl_addr_get_binary_addr (gw), sizeof (obj->gateway));
+	}
+	rtnl_route_get_metric (nlo, RTAX_ADVMSS, &obj->mss);
+	if (rtnl_route_get_flags (nlo) & RTM_F_CLONED)
+		obj->source = NM_IP_CONFIG_SOURCE_INTERNAL;
+	else
+		obj->source = rtprot_to_source (rtnl_route_get_protocol (nlo), TRUE);
+
+	return TRUE;
+}
+
 static gboolean
 init_ip6_route (NMPlatformIP6Route *route, struct rtnl_route *rtnlroute)
 {
@@ -1429,6 +1640,55 @@ init_ip6_route (NMPlatformIP6Route *route, struct rtnl_route *rtnlroute)
 	route->metric = rtnl_route_get_priority (rtnlroute);
 	rtnl_route_get_metric (rtnlroute, RTAX_ADVMSS, &route->mss);
 	route->source = rtprot_to_source (rtnl_route_get_protocol (rtnlroute), FALSE);
+
+	return TRUE;
+}
+
+gboolean
+_nmp_vt_cmd_plobj_init_from_nl_ip6_route (NMPlatformObject *_obj, const struct nl_object *_nlo, gboolean id_only)
+{
+	NMPlatformIP6Route *obj = (NMPlatformIP6Route *) _obj;
+	struct rtnl_route *nlo = (struct rtnl_route *) _nlo;
+	struct nl_addr *dst, *gw;
+	struct rtnl_nexthop *nexthop;
+
+	if (rtnl_route_get_type (nlo) != RTN_UNICAST ||
+	    rtnl_route_get_table (nlo) != RT_TABLE_MAIN ||
+	    rtnl_route_get_nnexthops (nlo) != 1)
+		return FALSE;
+
+	nexthop = rtnl_route_nexthop_n (nlo, 0);
+	if (!nexthop)
+		g_return_val_if_reached (FALSE);
+
+	dst = rtnl_route_get_dst (nlo);
+	if (!dst)
+		g_return_val_if_reached (FALSE);
+
+	if (nl_addr_get_len (dst)) {
+		if (nl_addr_get_len (dst) != sizeof (obj->network))
+			g_return_val_if_reached (FALSE);
+		memcpy (&obj->network, nl_addr_get_binary_addr (dst), sizeof (obj->network));
+	}
+	obj->ifindex = rtnl_route_nh_get_ifindex (nexthop);
+	obj->plen = nl_addr_get_prefixlen (dst);
+	obj->metric = rtnl_route_get_priority (nlo);
+
+	if (id_only)
+		return TRUE;
+
+	gw = rtnl_route_nh_get_gateway (nexthop);
+	if (gw) {
+		if (nl_addr_get_len (gw) != sizeof (obj->gateway))
+			g_warn_if_reached ();
+		else
+			memcpy (&obj->gateway, nl_addr_get_binary_addr (gw), sizeof (obj->gateway));
+	}
+	rtnl_route_get_metric (nlo, RTAX_ADVMSS, &obj->mss);
+	if (rtnl_route_get_flags (nlo) & RTM_F_CLONED)
+		obj->source = NM_IP_CONFIG_SOURCE_INTERNAL;
+	else
+		obj->source = rtprot_to_source (rtnl_route_get_protocol (nlo), FALSE);
 
 	return TRUE;
 }
@@ -2338,6 +2598,16 @@ build_rtnl_link (int ifindex, const char *name, NMLinkType type)
 		g_assert (!nle);
 	}
 	return (struct nl_object *) rtnllink;
+}
+
+struct nl_object *
+_nmp_vt_cmd_plobj_to_nl_link (NMPlatform *platform, const NMPlatformObject *_obj, gboolean id_only)
+{
+	const NMPlatformLink *obj = (const NMPlatformLink *) _obj;
+
+	return build_rtnl_link (obj->ifindex,
+	                        obj->name[0] ? obj->name : NULL,
+	                        obj->type);
 }
 
 static gboolean
@@ -3748,6 +4018,40 @@ build_rtnl_addr (NMPlatform *platform,
 	return (struct nl_object *) rtnladdr_copy;
 }
 
+struct nl_object *
+_nmp_vt_cmd_plobj_to_nl_ip4_address (NMPlatform *platform, const NMPlatformObject *_obj, gboolean id_only)
+{
+	const NMPlatformIP4Address *obj = (const NMPlatformIP4Address *) _obj;
+
+	return build_rtnl_addr (platform,
+	                        AF_INET,
+	                        obj->ifindex,
+	                        &obj->address,
+	                        obj->peer_address ? &obj->peer_address : NULL,
+	                        obj->plen,
+	                        obj->lifetime,
+	                        obj->preferred,
+	                        0,
+	                        obj->label[0] ? obj->label : NULL);
+}
+
+struct nl_object *
+_nmp_vt_cmd_plobj_to_nl_ip6_address (NMPlatform *platform, const NMPlatformObject *_obj, gboolean id_only)
+{
+	const NMPlatformIP6Address *obj = (const NMPlatformIP6Address *) _obj;
+
+	return build_rtnl_addr (platform,
+	                        AF_INET6,
+	                        obj->ifindex,
+	                        &obj->address,
+	                        !IN6_IS_ADDR_UNSPECIFIED (&obj->peer_address) ? &obj->peer_address : NULL,
+	                        obj->plen,
+	                        obj->lifetime,
+	                        obj->preferred,
+	                        0,
+	                        NULL);
+}
+
 static gboolean
 ip4_address_add (NMPlatform *platform,
                  int ifindex,
@@ -3999,6 +4303,38 @@ build_rtnl_route (int family, int ifindex, NMIPConfigSource source,
 		rtnl_route_set_metric (rtnlroute, RTAX_ADVMSS, mss);
 
 	return (struct nl_object *) rtnlroute;
+}
+
+struct nl_object *
+_nmp_vt_cmd_plobj_to_nl_ip4_route (NMPlatform *platform, const NMPlatformObject *_obj, gboolean id_only)
+{
+	const NMPlatformIP4Route *obj = (const NMPlatformIP4Route *) _obj;
+
+	return build_rtnl_route (AF_INET,
+	                         obj->ifindex,
+	                         obj->source,
+	                         &obj->network,
+	                         obj->plen,
+	                         &obj->gateway,
+	                         NULL,
+	                         obj->metric,
+	                         obj->mss);
+}
+
+struct nl_object *
+_nmp_vt_cmd_plobj_to_nl_ip6_route (NMPlatform *platform, const NMPlatformObject *_obj, gboolean id_only)
+{
+	const NMPlatformIP6Route *obj = (const NMPlatformIP6Route *) _obj;
+
+	return build_rtnl_route (AF_INET6,
+	                         obj->ifindex,
+	                         obj->source,
+	                         &obj->network,
+	                         obj->plen,
+	                         &obj->gateway,
+	                         NULL,
+	                         obj->metric,
+	                         obj->mss);
 }
 
 static gboolean

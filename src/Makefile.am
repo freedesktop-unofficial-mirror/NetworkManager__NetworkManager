@@ -492,6 +492,8 @@ libnm_iface_helper_la_SOURCES = \
 	nm-enum-types.h \
 	nm-logging.c \
 	nm-logging.h \
+	nm-multi-index.c \
+	nm-multi-index.h \
 	NetworkManagerUtils.c \
 	NetworkManagerUtils.h
 

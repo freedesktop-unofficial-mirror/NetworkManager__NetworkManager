@@ -47,6 +47,7 @@ typedef struct _NMSleepMonitor       NMSleepMonitor;
 typedef enum {
 	/* In priority order; higher number == higher priority */
 	NM_IP_CONFIG_SOURCE_UNKNOWN,
+	NM_IP_CONFIG_SOURCE_INTERNAL,
 	NM_IP_CONFIG_SOURCE_RTPROT_KERNEL,
 	NM_IP_CONFIG_SOURCE_KERNEL,
 	NM_IP_CONFIG_SOURCE_SHARED,
