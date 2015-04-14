@@ -4375,7 +4375,6 @@ udev_device_removed (NMPlatform *platform,
                      GUdevDevice *udev_device)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	auto_nl_object struct rtnl_link *rtnllink = NULL;
 	int ifindex = 0;
 
 	if (g_udev_device_get_property (udev_device, "IFINDEX"))
