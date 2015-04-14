@@ -37,8 +37,7 @@ examples_DATA = server.conf
 if WITH_UDEV_DIR
 udevrulesdir = $(UDEV_DIR)/rules.d
 udevrules_DATA = \
-	85-nm-unmanaged.rules \
-	77-nm-olpc-mesh.rules
+	85-nm-unmanaged.rules
 endif
 
 server.conf: server.conf.in
