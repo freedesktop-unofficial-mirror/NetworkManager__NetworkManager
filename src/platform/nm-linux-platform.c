@@ -820,20 +820,23 @@ static char *
 read_devtype (const char *sysfs_path)
 {
 	gs_free char *uevent = g_strdup_printf ("%s/uevent", sysfs_path);
-	gs_free char *contents = NULL;
-	gs_strfreev char **lines = NULL;
-	char **iter;
-	char *devtype = NULL;
+	char *contents = NULL;
+	char *cont, *end;
 
 	if (!g_file_get_contents (uevent, &contents, NULL, NULL))
 		return NULL;
-	lines = g_strsplit_set (contents, "\r\n", 0);
-	for (iter = lines; iter && *iter; iter++) {
-		if (strncmp (*iter, DEVTYPE_PREFIX, STRLEN (DEVTYPE_PREFIX)) == 0)
-			return g_strdup (*iter + STRLEN (DEVTYPE_PREFIX));
+	for (cont = contents; cont; cont = end) {
+		end = strpbrk (cont, "\r\n");
+		if (end)
+			*end++ = '\0';
+		if (strncmp (cont, DEVTYPE_PREFIX, STRLEN (DEVTYPE_PREFIX)) == 0) {
+			cont += STRLEN (DEVTYPE_PREFIX);
+			memmove (contents, cont, strlen (cont) + 1);
+			return contents;
+		}
 	}
-
-	return devtype;
+	g_free (contents);
+	return NULL;
 }
 
 static NMLinkType
