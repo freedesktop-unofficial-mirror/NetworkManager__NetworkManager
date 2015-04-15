@@ -819,8 +819,7 @@ type_to_rtnl_type_string (NMLinkType type)
 		if (type == linktypes[i].nm_type)
 			return linktypes[i].rtnl_type;
 	}
-	g_warning ("Wrong/unhandled type: %d", type);
-	return NULL;
+	g_return_val_if_reached (NULL);
 }
 
 static const char *
@@ -832,8 +831,7 @@ type_to_string (NMLinkType type)
 		if (type == linktypes[i].nm_type)
 			return linktypes[i].type_string;
 	}
-	g_warning ("Wrong/unhandled type: %d", type);
-	return NULL;
+	g_return_val_if_reached (NULL);
 }
 
 static NMLinkType
