@@ -2781,13 +2781,9 @@ event_notification (struct nl_msg *msg, gpointer user_data)
 {
 	NMPlatform *platform = NM_PLATFORM (user_data);
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	struct nl_cache *cache;
-	auto_nl_object struct nl_object *object = NULL;
-	auto_nl_object struct nl_object *cached_object = NULL;
-	auto_nl_object struct nl_object *kernel_object = NULL;
+	auto_nl_object struct nl_object *nlo = NULL;
+	auto_nmp_obj NMPObject *obj = NULL;
 	int event;
-	int nle;
-	ObjectType type;
 
 	event = nlmsg_hdr (msg)->nlmsg_type;
 
@@ -2798,109 +2794,24 @@ event_notification (struct nl_msg *msg, gpointer user_data)
 		_check_support_kernel_extended_ifa_flags_init (priv, msg);
 	}
 
-	nl_msg_parse (msg, ref_object, &object);
-	if (!object)
+	nl_msg_parse (msg, ref_object, &nlo);
+	if (!nlo)
 		return NL_OK;
 
-	type = _nlo_get_object_type (object);
+	obj = nmp_object_from_nl (nlo, FALSE);
 
-	if (type == OBJECT_TYPE_LINK)
-		_support_user_ipv6ll_detect ((struct rtnl_link *) object);
+	if (   (obj && NMP_OBJECT_GET_TYPE (obj) == OBJECT_TYPE_LINK)
+	    || _nlo_get_object_type (nlo) == OBJECT_TYPE_LINK)
+		_support_user_ipv6ll_detect ((struct rtnl_link *) nlo);
 
-	if (nm_logging_enabled (LOGL_DEBUG, LOGD_PLATFORM)) {
-		if (type == OBJECT_TYPE_LINK) {
-			const char *name = rtnl_link_get_name ((struct rtnl_link *) object);
+	debug ("netlink even (type %d): %s", event, nmp_object_to_string (obj));
 
-			debug ("netlink event (type %d) for link: %s (%d, family %d)",
-			       event, name ? name : "(unknown)",
-			       rtnl_link_get_ifindex ((struct rtnl_link *) object),
-			       rtnl_link_get_family ((struct rtnl_link *) object));
-		} else
-			debug ("netlink event (type %d)", event);
+	if (obj) {
+		_pf_main_refresh_object (platform, obj, NM_PLATFORM_REASON_EXTERNAL, TRUE, NULL);
+		_pf_delayed_action_handle (platform);
 	}
 
-	cache = choose_cache_by_type (platform, type);
-	cached_object = nm_nl_cache_search (cache, object);
-	kernel_object = get_kernel_object (priv->nlh, object);
-
-	hack_empty_master_iff_lower_up (platform, kernel_object);
-
-	/* Removed object */
-	switch (event) {
-	case RTM_DELLINK:
-	case RTM_DELADDR:
-	case RTM_DELROUTE:
-		/* Ignore inconsistent deletion
-		 *
-		 * Quick external deletion and addition can be occasionally
-		 * seen as just a change.
-		 */
-		if (kernel_object)
-			return NL_OK;
-		/* Ignore internal deletion */
-		if (!cached_object)
-			return NL_OK;
-
-		nl_cache_remove (cached_object);
-		/* Don't announce removed interfaces that are not recognized by
-		 * udev. They were either not yet discovered or they have been
-		 * already removed and announced.
-		 */
-		if (event == RTM_DELLINK) {
-			if (!link_is_announceable (platform, (struct rtnl_link *) cached_object))
-				return NL_OK;
-		}
-		announce_object (platform, cached_object, NM_PLATFORM_SIGNAL_REMOVED, NM_PLATFORM_REASON_EXTERNAL);
-
-		return NL_OK;
-	case RTM_NEWLINK:
-	case RTM_NEWADDR:
-	case RTM_NEWROUTE:
-		/* Ignore inconsistent addition or change (kernel will send a good one)
-		 *
-		 * Quick sequence of RTM_NEWLINK notifications can be occasionally
-		 * collapsed to just one addition or deletion, depending of whether we
-		 * already have the object in cache.
-		 */
-		if (!kernel_object)
-			return NL_OK;
-
-		/* Ignore unsupported object types (e.g. AF_PHONET family addresses) */
-		if (type == OBJECT_TYPE_UNKNOWN)
-			return NL_OK;
-
-		/* Handle external addition */
-		if (!cached_object) {
-			nle = nl_cache_add (cache, kernel_object);
-			if (nle) {
-				error ("netlink cache error: %s", nl_geterror (nle));
-				return NL_OK;
-			}
-			announce_object (platform, kernel_object, NM_PLATFORM_SIGNAL_ADDED, NM_PLATFORM_REASON_EXTERNAL);
-			return NL_OK;
-		}
-		/* Ignore non-change
-		 *
-		 * This also catches notifications for internal addition or change, unless
-		 * another action occured very soon after it.
-		 */
-		if (!nm_nl_object_diff (type, kernel_object, cached_object))
-			return NL_OK;
-
-		/* Handle external change */
-		nl_cache_remove (cached_object);
-		nle = nl_cache_add (cache, kernel_object);
-		if (nle) {
-			error ("netlink cache error: %s", nl_geterror (nle));
-			return NL_OK;
-		}
-		announce_object (platform, kernel_object, NM_PLATFORM_SIGNAL_CHANGED, NM_PLATFORM_REASON_EXTERNAL);
-
-		return NL_OK;
-	default:
-		error ("Unknown netlink event: %d", event);
-		return NL_OK;
-	}
+	return NL_OK;
 }
 
 /******************************************************************/
@@ -3073,36 +2984,25 @@ static GArray *
 link_get_all (NMPlatform *platform)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	GArray *links = g_array_sized_new (FALSE, FALSE, sizeof (NMPlatformLink), nl_cache_nitems (priv->link_cache));
-	NMPlatformLink device;
-	struct nl_object *object;
+	NMPCacheId cache_id;
 
-	for (object = nl_cache_get_first (priv->link_cache); object; object = nl_cache_get_next (object)) {
-		struct rtnl_link *rtnl_link = (struct rtnl_link *) object;
-
-		if (link_is_announceable (platform, rtnl_link)) {
-			if (init_link (platform, &device, rtnl_link))
-				g_array_append_val (links, device);
-		}
-	}
-
-	return links;
+	return nmp_cache_lookup_multi_to_array (priv->cache,
+	                                        OBJECT_TYPE_LINK,
+	                                        nmp_cache_id_init_links (&cache_id, TRUE));
 }
 
 static gboolean
 _nm_platform_link_get (NMPlatform *platform, int ifindex, NMPlatformLink *l)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	auto_nl_object struct rtnl_link *rtnllink = NULL;
+	const NMPlatformLink *link;
 
-	rtnllink = rtnl_link_get (priv->link_cache, ifindex);
-	if (rtnllink) {
-		if (link_is_announceable (platform, rtnllink)) {
-			if (init_link (platform, l, rtnllink))
-				return TRUE;
-		}
-	}
-	return FALSE;
+	link = nmp_cache_lookup_link_downcast (priv->cache, ifindex);
+	if (!link)
+		return FALSE;
+
+	*l = *link;
+	return TRUE;
 }
 
 static struct nl_object *
@@ -3200,7 +3100,7 @@ _pf_main_delete_object (NMPlatform *platform, const NMPObject *obj_id)
 static gboolean
 link_add (NMPlatform *platform, const char *name, NMLinkType type, const void *address, size_t address_len)
 {
-	struct nl_object *l;
+	auto_nl_object struct nl_object *l = NULL;
 
 	if (type == NM_LINK_TYPE_BOND) {
 		/* When the kernel loads the bond module, either via explicit modprobe
@@ -3225,7 +3125,8 @@ link_add (NMPlatform *platform, const char *name, NMLinkType type, const void *a
 
 		rtnl_link_set_addr ((struct rtnl_link *) l, nladdr);
 	}
-	return add_object (platform, l);
+
+	return _pf_main_add_link (platform, name, (struct rtnl_link *) l);
 }
 
 static struct rtnl_link *
@@ -3291,14 +3192,15 @@ static gboolean
 link_delete (NMPlatform *platform, int ifindex)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	struct rtnl_link *rtnllink = rtnl_link_get (priv->link_cache, ifindex);
+	NMPObject obj_id;
 
-	if (!rtnllink) {
+	if (!nmp_cache_lookup_link (priv->cache, ifindex)) {
 		platform->error = NM_PLATFORM_ERROR_NOT_FOUND;
 		return FALSE;
 	}
 
-	return delete_object (platform, build_rtnl_link (ifindex, NULL, NM_LINK_TYPE_NONE), TRUE);
+	return _pf_main_delete_object (platform,
+	                               nmp_object_stackinit_id_link (&obj_id, ifindex));
 }
 
 static int
@@ -3312,9 +3214,13 @@ link_get_ifindex (NMPlatform *platform, const char *ifname)
 static const char *
 link_get_name (NMPlatform *platform, int ifindex)
 {
-	auto_nl_object struct rtnl_link *rtnllink = link_get (platform, ifindex);
+	const NMPObject *link;
 
-	return rtnllink ? rtnl_link_get_name (rtnllink) : NULL;
+	link = nmp_cache_lookup_link (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->cache, ifindex);
+
+	if (link && nmp_object_is_visible (link))
+		return link->link.name;
+	return NULL;
 }
 
 static NMLinkType
@@ -3339,7 +3245,12 @@ static gboolean
 link_get_unmanaged (NMPlatform *platform, int ifindex, gboolean *managed)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	GUdevDevice *udev_device = g_hash_table_lookup (priv->udev_devices, GINT_TO_POINTER (ifindex));
+	const NMPObject *link;
+	GUdevDevice *udev_device = NULL;
+
+	link = nmp_cache_lookup_link (priv->cache, ifindex);
+	if (link)
+		udev_device = link->_link.udev.device;
 
 	if (udev_device && g_udev_device_get_property (udev_device, "NM_UNMANAGED")) {
 		*managed = g_udev_device_get_property_as_boolean (udev_device, "NM_UNMANAGED");
@@ -3709,8 +3620,7 @@ link_get_dev_id (NMPlatform *platform, int ifindex)
 static int
 vlan_add (NMPlatform *platform, const char *name, int parent, int vlan_id, guint32 vlan_flags)
 {
-	struct nl_object *object = build_rtnl_link (0, name, NM_LINK_TYPE_VLAN);
-	struct rtnl_link *rtnllink = (struct rtnl_link *) object;
+	auto_nl_object struct rtnl_link *rtnllink = (struct rtnl_link *) build_rtnl_link (0, name, NM_LINK_TYPE_VLAN);
 	unsigned int kernel_flags;
 
 	kernel_flags = 0;
@@ -3728,7 +3638,7 @@ vlan_add (NMPlatform *platform, const char *name, int parent, int vlan_id, guint
 	debug ("link: add vlan '%s', parent %d, vlan id %d, flags %X (native: %X)",
 	       name, parent, vlan_id, (unsigned int) vlan_flags, kernel_flags);
 
-	return add_object (platform, object);
+	return _pf_main_add_link (platform, name, rtnllink);
 }
 
 static gboolean
@@ -4649,10 +4559,16 @@ ip4_address_add (NMPlatform *platform,
                  guint32 preferred,
                  const char *label)
 {
-	return add_object (platform, build_rtnl_addr (platform, AF_INET, ifindex, &addr,
-	                                              peer_addr ? &peer_addr : NULL,
-	                                              plen, lifetime, preferred, 0,
-	                                              label));
+	NMPObject obj_needle;
+	auto_nl_addr struct nl_object *nlo = NULL;
+
+	nlo = build_rtnl_addr (platform, AF_INET, ifindex, &addr,
+	                       peer_addr ? &peer_addr : NULL,
+	                       plen, lifetime, preferred, 0,
+	                       label);
+	return _pf_main_add_addrroute (platform,
+	                               nmp_object_stackinit_id_ip4_address (&obj_needle, ifindex, addr, plen),
+	                               nlo);
 }
 
 static gboolean
@@ -4665,22 +4581,35 @@ ip6_address_add (NMPlatform *platform,
                  guint32 preferred,
                  guint flags)
 {
-	return add_object (platform, build_rtnl_addr (platform, AF_INET6, ifindex, &addr,
-	                                              IN6_IS_ADDR_UNSPECIFIED (&peer_addr) ? NULL : &peer_addr,
-	                                              plen, lifetime, preferred, flags,
-	                                              NULL));
+	NMPObject obj_needle;
+	auto_nl_addr struct nl_object *nlo = NULL;
+
+	nlo = build_rtnl_addr (platform, AF_INET6, ifindex, &addr,
+	                       IN6_IS_ADDR_UNSPECIFIED (&peer_addr) ? NULL : &peer_addr,
+	                       plen, lifetime, preferred, flags,
+	                       NULL);
+	return _pf_main_add_addrroute (platform,
+	                               nmp_object_stackinit_id_ip6_address (&obj_needle, ifindex, &addr, plen),
+	                               nlo);
 }
 
 static gboolean
 ip4_address_delete (NMPlatform *platform, int ifindex, in_addr_t addr, int plen, in_addr_t peer_address)
 {
-	return delete_object (platform, build_rtnl_addr (platform, AF_INET, ifindex, &addr, peer_address ? &peer_address : NULL, plen, 0, 0, 0, NULL), TRUE);
+	NMPObject obj_id;
+
+	nmp_object_stackinit_id_ip4_address (&obj_id, ifindex, addr, plen);
+	obj_id.ip4_address.peer_address = peer_address;
+	return _pf_main_delete_object (platform, &obj_id);
 }
 
 static gboolean
 ip6_address_delete (NMPlatform *platform, int ifindex, struct in6_addr addr, int plen)
 {
-	return delete_object (platform, build_rtnl_addr (platform, AF_INET6, ifindex, &addr, NULL, plen, 0, 0, 0, NULL), TRUE);
+	NMPObject obj_id;
+
+	return _pf_main_delete_object (platform,
+	                               nmp_object_stackinit_id_ip6_address (&obj_id, ifindex, &addr, plen));
 }
 
 static gboolean
@@ -4695,13 +4624,19 @@ ip_address_exists (NMPlatform *platform, int family, int ifindex, gconstpointer 
 static gboolean
 ip4_address_exists (NMPlatform *platform, int ifindex, in_addr_t addr, int plen)
 {
-	return ip_address_exists (platform, AF_INET, ifindex, &addr, plen);
+	NMPObject obj_id;
+
+	return !!nmp_cache_lookup_obj (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->cache,
+	                               nmp_object_stackinit_id_ip4_address (&obj_id, ifindex, addr, plen));
 }
 
 static gboolean
 ip6_address_exists (NMPlatform *platform, int ifindex, struct in6_addr addr, int plen)
 {
-	return ip_address_exists (platform, AF_INET6, ifindex, &addr, plen);
+	NMPObject obj_id;
+
+	return !!nmp_cache_lookup_obj (NM_LINUX_PLATFORM_GET_PRIVATE (platform)->cache,
+	                               nmp_object_stackinit_id_ip6_address (&obj_id, ifindex, &addr, plen));
 }
 
 static gboolean
@@ -4772,61 +4707,36 @@ _route_match (struct rtnl_route *rtnlroute, int family, int ifindex, gboolean in
 }
 
 static GArray *
-ip4_route_get_all (NMPlatform *platform, int ifindex, NMPlatformGetRouteMode mode)
+ipx_route_get_all (NMPlatform *platform, int ifindex, gboolean is_v4, NMPlatformGetRouteMode mode)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	GArray *routes;
-	NMPlatformIP4Route route;
-	struct nl_object *object;
+	NMPCacheId cache_id;
+	NMPCacheIdType id_type;
 
-	g_return_val_if_fail (NM_IN_SET (mode, NM_PLATFORM_GET_ROUTE_MODE_ALL, NM_PLATFORM_GET_ROUTE_MODE_NO_DEFAULT, NM_PLATFORM_GET_ROUTE_MODE_ONLY_DEFAULT), NULL);
+	if (mode == NM_PLATFORM_GET_ROUTE_MODE_ALL)
+		id_type = NMP_CACHE_ID_TYPE_ROUTES_VISIBLE_ALL;
+	else if (mode == NM_PLATFORM_GET_ROUTE_MODE_NO_DEFAULT)
+		id_type = NMP_CACHE_ID_TYPE_ROUTES_VISIBLE_NO_DEFAULT;
+	else if (mode == NM_PLATFORM_GET_ROUTE_MODE_ONLY_DEFAULT)
+		id_type = NMP_CACHE_ID_TYPE_ROUTES_VISIBLE_ONLY_DEFAULT;
+	else
+		g_return_val_if_reached (NULL);
 
-	routes = g_array_new (FALSE, FALSE, sizeof (NMPlatformIP4Route));
+	return nmp_cache_lookup_multi_to_array (priv->cache,
+	                                        is_v4 ? OBJECT_TYPE_IP4_ROUTE : OBJECT_TYPE_IP6_ROUTE,
+	                                        nmp_cache_id_init_routes_visible (&cache_id, id_type, is_v4, ifindex));
+}
 
-	for (object = nl_cache_get_first (priv->route_cache); object; object = nl_cache_get_next (object)) {
-		if (_route_match ((struct rtnl_route *) object, AF_INET, ifindex, FALSE)) {
-			if (_rtnl_route_is_default ((struct rtnl_route *) object)) {
-				if (mode == NM_PLATFORM_GET_ROUTE_MODE_NO_DEFAULT)
-					continue;
-			} else {
-				if (mode == NM_PLATFORM_GET_ROUTE_MODE_ONLY_DEFAULT)
-					continue;
-			}
-			if (init_ip4_route (&route, (struct rtnl_route *) object))
-				g_array_append_val (routes, route);
-		}
-	}
-
-	return routes;
+static GArray *
+ip4_route_get_all (NMPlatform *platform, int ifindex, NMPlatformGetRouteMode mode)
+{
+	return ipx_route_get_all (platform, ifindex, TRUE, mode);
 }
 
 static GArray *
 ip6_route_get_all (NMPlatform *platform, int ifindex, NMPlatformGetRouteMode mode)
 {
-	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	GArray *routes;
-	NMPlatformIP6Route route;
-	struct nl_object *object;
-
-	g_return_val_if_fail (NM_IN_SET (mode, NM_PLATFORM_GET_ROUTE_MODE_ALL, NM_PLATFORM_GET_ROUTE_MODE_NO_DEFAULT, NM_PLATFORM_GET_ROUTE_MODE_ONLY_DEFAULT), NULL);
-
-	routes = g_array_new (FALSE, FALSE, sizeof (NMPlatformIP6Route));
-
-	for (object = nl_cache_get_first (priv->route_cache); object; object = nl_cache_get_next (object)) {
-		if (_route_match ((struct rtnl_route *) object, AF_INET6, ifindex, FALSE)) {
-			if (_rtnl_route_is_default ((struct rtnl_route *) object)) {
-				if (mode == NM_PLATFORM_GET_ROUTE_MODE_NO_DEFAULT)
-					continue;
-			} else {
-				if (mode == NM_PLATFORM_GET_ROUTE_MODE_ONLY_DEFAULT)
-					continue;
-			}
-			if (init_ip6_route (&route, (struct rtnl_route *) object))
-				g_array_append_val (routes, route);
-		}
-	}
-
-	return routes;
+	return ipx_route_get_all (platform, ifindex, FALSE, mode);
 }
 
 static void
@@ -4929,7 +4839,13 @@ ip4_route_add (NMPlatform *platform, int ifindex, NMIPConfigSource source,
                in_addr_t network, int plen, in_addr_t gateway,
                guint32 pref_src, guint32 metric, guint32 mss)
 {
-	return add_object (platform, build_rtnl_route (AF_INET, ifindex, source, &network, plen, &gateway, pref_src ? &pref_src : NULL, metric, mss));
+	NMPObject obj_needle;
+	auto_nl_object struct nl_object *nlo = NULL;
+
+	nlo = build_rtnl_route (AF_INET, ifindex, source, &network, plen, &gateway, pref_src ? &pref_src : NULL, metric, mss);
+	return _pf_main_add_addrroute (platform,
+	                               nmp_object_stackinit_id_ip4_route (&obj_needle, ifindex, network, plen, metric),
+	                               nlo);
 }
 
 static gboolean
@@ -4937,9 +4853,15 @@ ip6_route_add (NMPlatform *platform, int ifindex, NMIPConfigSource source,
                struct in6_addr network, int plen, struct in6_addr gateway,
                guint32 metric, guint32 mss)
 {
+	NMPObject obj_needle;
+	auto_nl_object struct nl_object *nlo = NULL;
+
 	metric = nm_utils_ip6_route_metric_normalize (metric);
 
-	return add_object (platform, build_rtnl_route (AF_INET6, ifindex, source, &network, plen, &gateway, NULL, metric, mss));
+	nlo = build_rtnl_route (AF_INET6, ifindex, source, &network, plen, &gateway, NULL, metric, mss);
+	return _pf_main_add_addrroute (platform,
+	                               nmp_object_stackinit_id_ip6_route (&obj_needle, ifindex, &network, plen, metric),
+	                               nlo);
 }
 
 static struct rtnl_route *
@@ -5346,11 +5268,9 @@ static void
 udev_device_added (NMPlatform *platform,
                    GUdevDevice *udev_device)
 {
-	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	auto_nl_object struct rtnl_link *rtnllink = NULL;
 	const char *ifname;
 	int ifindex;
-	gboolean was_announceable = FALSE;
+	auto_nmp_obj NMPObject *obj = NULL;
 
 	ifname = g_udev_device_get_name (udev_device);
 	if (!ifname) {
@@ -5374,42 +5294,38 @@ udev_device_added (NMPlatform *platform,
 		return;
 	}
 
-	rtnllink = rtnl_link_get (priv->link_cache, ifindex);
-	if (rtnllink)
-		was_announceable = link_is_announceable (platform, rtnllink);
+	obj = nmp_object_new (OBJECT_TYPE_LINK, NULL);
+	obj->link.ifindex = ifindex;
+	obj->_link.udev.device = g_object_ref (udev_device);
 
-	g_hash_table_insert (priv->udev_devices, GINT_TO_POINTER (ifindex),
-	                     g_object_ref (udev_device));
-
-	/* Announce devices only if they also have been discovered via Netlink. */
-	if (rtnllink && link_is_announceable (platform, rtnllink))
-		announce_object (platform, (struct nl_object *) rtnllink, was_announceable ? NM_PLATFORM_SIGNAL_CHANGED : NM_PLATFORM_SIGNAL_ADDED, NM_PLATFORM_REASON_EXTERNAL);
+	_pf_main_cache_update (platform, obj, NMP_OBJECT_ASPECT_UDEV, NM_PLATFORM_REASON_EXTERNAL);
 }
 
 static void
 udev_device_removed (NMPlatform *platform,
                      GUdevDevice *udev_device)
 {
-	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
-	auto_nl_object struct rtnl_link *rtnllink = NULL;
+	auto_nmp_obj NMPObject *obj = NULL;
 	int ifindex = 0;
-	gboolean was_announceable = FALSE;
 
 	if (g_udev_device_get_property (udev_device, "IFINDEX"))
 		ifindex = g_udev_device_get_property_as_int (udev_device, "IFINDEX");
 	else {
-		GHashTableIter iter;
-		gpointer key, value;
+		NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+		NMPCacheId cache_id;
+		const NMPObjectLink *const *links;
 
 		/* This should not happen, but just to be sure.
 		 * If we can't get IFINDEX, go through the devices and
 		 * compare the pointers.
 		 */
-		g_hash_table_iter_init (&iter, priv->udev_devices);
-		while (g_hash_table_iter_next (&iter, &key, &value)) {
-			if ((GUdevDevice *)value == udev_device) {
-				ifindex = GPOINTER_TO_INT (key);
-				break;
+		links = (const NMPObjectLink *const *) nmp_cache_lookup_multi (priv->cache, nmp_cache_id_init_links (&cache_id, FALSE), NULL);
+		if (links) {
+			for (; *links; links++) {
+				if (udev_device == (*links)->udev.device) {
+					ifindex = (*links)->_public.ifindex;
+					break;
+				}
 			}
 		}
 	}
@@ -5418,15 +5334,10 @@ udev_device_removed (NMPlatform *platform,
 	if (ifindex <= 0)
 		return;
 
-	rtnllink = rtnl_link_get (priv->link_cache, ifindex);
-	if (rtnllink)
-		was_announceable = link_is_announceable (platform, rtnllink);
+	obj = nmp_object_new (OBJECT_TYPE_LINK, NULL);
+	obj->link.ifindex = ifindex;
 
-	g_hash_table_remove (priv->udev_devices, GINT_TO_POINTER (ifindex));
-
-	/* Announce device removal if it is no longer announceable. */
-	if (was_announceable && !link_is_announceable (platform, rtnllink))
-		announce_object (platform, (struct nl_object *) rtnllink, NM_PLATFORM_SIGNAL_REMOVED, NM_PLATFORM_REASON_EXTERNAL);
+	_pf_main_cache_update (platform, obj, NMP_OBJECT_ASPECT_UDEV, NM_PLATFORM_REASON_EXTERNAL);
 }
 
 static void

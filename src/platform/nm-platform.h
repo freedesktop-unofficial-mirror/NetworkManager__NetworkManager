@@ -607,6 +607,8 @@ gboolean nm_platform_address_flush (NMPlatform *self, int ifindex);
 
 gboolean nm_platform_ip4_check_reinstall_device_route (NMPlatform *self, int ifindex, const NMPlatformIP4Address *address, guint32 device_route_metric);
 
+/* FIXME: adjust the signature of the get_all() functions to return the internal array
+ * from the cache directly, without need to create a copy. */
 GArray *nm_platform_ip4_route_get_all (NMPlatform *self, int ifindex, NMPlatformGetRouteMode mode);
 GArray *nm_platform_ip6_route_get_all (NMPlatform *self, int ifindex, NMPlatformGetRouteMode mode);
 gboolean nm_platform_ip4_route_add (NMPlatform *self, int ifindex, NMIPConfigSource source,
