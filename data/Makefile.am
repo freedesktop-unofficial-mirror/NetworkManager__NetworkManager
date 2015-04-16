@@ -58,7 +58,6 @@ EXTRA_DIST = \
 	NetworkManager-dispatcher.service.in \
 	org.freedesktop.NetworkManager.service.in \
 	85-nm-unmanaged.rules \
-	77-nm-olpc-mesh.rules \
 	server.conf.in
 
 CLEANFILES = \
