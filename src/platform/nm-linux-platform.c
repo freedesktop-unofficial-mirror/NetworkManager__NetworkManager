@@ -1526,22 +1526,6 @@ announce_object (NMPlatform *platform, const struct nl_object *object, NMPlatfor
 			if (!init_link (platform, &device, rtnl_link))
 				return;
 
-			/* Skip devices not yet discovered by udev. They will be
-			 * announced by udev_device_added(). This doesn't apply to removed
-			 * devices, as those come either from udev_device_removed(),
-			 * event_notification() or link_delete() which block the announcment
-			 * themselves when appropriate.
-			 */
-			switch (change_type) {
-			case NM_PLATFORM_SIGNAL_ADDED:
-			case NM_PLATFORM_SIGNAL_CHANGED:
-				if (!device.driver)
-					return;
-				break;
-			default:
-				break;
-			}
-
 			/* Link deletion or setting down is sometimes accompanied by address
 			 * and/or route deletion.
 			 *
