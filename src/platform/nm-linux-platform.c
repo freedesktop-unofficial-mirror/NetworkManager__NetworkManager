@@ -775,43 +775,63 @@ check_support_user_ipv6ll (NMPlatform *platform)
 
 /* Object type specific utilities */
 
+typedef struct {
+	const NMLinkType nm_type;
+	const char *type_string;
+	/* IFLA_INFO_KIND / rtnl_link_get_type() where applicable; the rtnl type
+	 * should only be specificed if it is a direct mapping.  eg, tun/tap
+	 * should not be specified since both tun and tap devices use "tun".
+	 */
+	const char *rtnl_type;
+} LinkDesc;
+
+static const LinkDesc linktypes[] = {
+	{ NM_LINK_TYPE_ETHERNET,      "ethernet",    NULL },
+	{ NM_LINK_TYPE_INFINIBAND,    "infiniband",  NULL },
+	{ NM_LINK_TYPE_OLPC_MESH,     "olpc-mesh",   NULL },
+	{ NM_LINK_TYPE_WIFI,          "wifi",        "wlan" },
+	{ NM_LINK_TYPE_WWAN_ETHERNET, "wwan",        "wwan" },
+	{ NM_LINK_TYPE_WIMAX,         "wimax",       "wimax" },
+	{ NM_LINK_TYPE_LOOPBACK,      "loopback",    NULL },
+	{ NM_LINK_TYPE_OPENVSWITCH,   "openvswitch", "openvswitch" },
+	{ NM_LINK_TYPE_TAP,           "tap",         NULL },
+	{ NM_LINK_TYPE_TUN,           "tun",         NULL },
+	{ NM_LINK_TYPE_DUMMY,         "dummy",       "dummy" },
+	{ NM_LINK_TYPE_GRE,           "gre",         "gre" },
+	{ NM_LINK_TYPE_GRETAP,        "gretap",      "gretap" },
+	{ NM_LINK_TYPE_IFB,           "ifb",         "ifb" },
+	{ NM_LINK_TYPE_MACVLAN,       "macvlan",     "macvlan" },
+	{ NM_LINK_TYPE_MACVTAP,       "macvtap",     "macvtap" },
+	{ NM_LINK_TYPE_VETH,          "veth",        "veth" },
+	{ NM_LINK_TYPE_VLAN,          "vlan",        "vlan" },
+	{ NM_LINK_TYPE_VXLAN,         "vxlan",       "vxlan" },
+	{ NM_LINK_TYPE_BRIDGE,        "bridge",      "bridge" },
+	{ NM_LINK_TYPE_BOND,          "bond",        "bond" },
+	{ NM_LINK_TYPE_TEAM,          "team",        "team" }
+};
+
+static const char *
+type_to_rtnl_type_string (NMLinkType type)
+{
+	int i;
+
+	for (i = 0; i < G_N_ELEMENTS (linktypes); i++) {
+		if (type == linktypes[i].nm_type)
+			return linktypes[i].rtnl_type;
+	}
+	g_return_val_if_reached (NULL);
+}
+
 static const char *
 type_to_string (NMLinkType type)
 {
-	/* Note that this only has to support virtual types */
-	switch (type) {
-	case NM_LINK_TYPE_DUMMY:
-		return "dummy";
-	case NM_LINK_TYPE_GRE:
-		return "gre";
-	case NM_LINK_TYPE_GRETAP:
-		return "gretap";
-	case NM_LINK_TYPE_IFB:
-		return "ifb";
-	case NM_LINK_TYPE_MACVLAN:
-		return "macvlan";
-	case NM_LINK_TYPE_MACVTAP:
-		return "macvtap";
-	case NM_LINK_TYPE_TAP:
-		return "tap";
-	case NM_LINK_TYPE_TUN:
-		return "tun";
-	case NM_LINK_TYPE_VETH:
-		return "veth";
-	case NM_LINK_TYPE_VLAN:
-		return "vlan";
-	case NM_LINK_TYPE_VXLAN:
-		return "vxlan";
-	case NM_LINK_TYPE_BRIDGE:
-		return "bridge";
-	case NM_LINK_TYPE_BOND:
-		return "bond";
-	case NM_LINK_TYPE_TEAM:
-		return "team";
-	default:
-		g_warning ("Wrong type: %d", type);
-		return NULL;
+	int i;
+
+	for (i = 0; i < G_N_ELEMENTS (linktypes); i++) {
+		if (type == linktypes[i].nm_type)
+			return linktypes[i].type_string;
 	}
+	g_return_val_if_reached (NULL);
 }
 
 #define DEVTYPE_PREFIX "DEVTYPE="
@@ -2235,7 +2255,7 @@ build_rtnl_link (int ifindex, const char *name, NMLinkType type)
 
 	rtnllink = _nm_rtnl_link_alloc (ifindex, name);
 	if (type) {
-		nle = rtnl_link_set_type (rtnllink, type_to_string (type));
+		nle = rtnl_link_set_type (rtnllink, type_to_rtnl_type_string (type));
 		g_assert (!nle);
 	}
 	return (struct nl_object *) rtnllink;
