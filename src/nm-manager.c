@@ -1869,6 +1869,10 @@ add_device (NMManager *self, NMDevice *device, gboolean try_assume)
 	sleeping = manager_sleeping (self);
 	nm_device_set_initial_unmanaged_flag (device, NM_UNMANAGED_INTERNAL, sleeping);
 
+	nm_settings_device_added (priv->settings, device);
+
+	nm_device_set_initial_unmanaged_flag (device, NM_UNMANAGED_PLATFORM_INIT, TRUE);
+
 	nm_device_dbus_export (device);
 	nm_device_finish_init (device);
 
@@ -1878,13 +1882,6 @@ add_device (NMManager *self, NMDevice *device, gboolean try_assume)
 		                  G_CALLBACK (recheck_assume_connection), self);
 	}
 
-	if (!connection_assumed && nm_device_get_managed (device)) {
-		nm_device_state_changed (device,
-		                         NM_DEVICE_STATE_UNAVAILABLE,
-		                         NM_DEVICE_STATE_REASON_NOW_MANAGED);
-	}
-
-	nm_settings_device_added (priv->settings, device);
 	g_signal_emit (self, signals[DEVICE_ADDED], 0, device);
 	g_object_notify (G_OBJECT (self), NM_MANAGER_DEVICES);
 
