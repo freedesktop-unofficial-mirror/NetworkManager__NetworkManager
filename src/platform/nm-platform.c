@@ -95,6 +95,7 @@ nm_platform_setup (GType type)
 	g_assert (status);
 }
 
+
 /**
  * nm_platform_free:
  *
@@ -351,6 +352,10 @@ nm_platform_query_devices (void)
 		               NM_PLATFORM_REASON_INTERNAL);
 	}
 	g_array_unref (links_array);
+
+	/* Platform specific device setup. */
+	if (klass->setup_devices)
+		klass->setup_devices (platform);
 }
 
 /**

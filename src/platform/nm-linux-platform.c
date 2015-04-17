@@ -4403,8 +4403,6 @@ setup (NMPlatform *platform)
 {
 	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
 	const char *udev_subsys[] = { "net", NULL };
-	GUdevEnumerator *enumerator;
-	GList *devices, *iter;
 	int channel_flags;
 	gboolean status;
 	int nle;
@@ -4471,6 +4469,24 @@ setup (NMPlatform *platform)
 	g_signal_connect (priv->udev_client, "uevent", G_CALLBACK (handle_udev_event), platform);
 	priv->udev_devices = g_hash_table_new_full (NULL, NULL, NULL, g_object_unref);
 
+	/* request all IPv6 addresses (hopeing that there is at least one), to check for
+	 * the IFA_FLAGS attribute. */
+	nle = nl_rtgen_request (priv->nlh_event, RTM_GETADDR, AF_INET6, NLM_F_DUMP);
+	if (nle < 0)
+		nm_log_warn (LOGD_PLATFORM, "Netlink error: requesting RTM_GETADDR failed with %s", nl_geterror (nle));
+
+	priv->wifi_data = g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) wifi_utils_deinit);
+
+	return TRUE;
+}
+
+static void
+setup_devices (NMPlatform *platform)
+{
+	NMLinuxPlatformPrivate *priv = NM_LINUX_PLATFORM_GET_PRIVATE (platform);
+	GUdevEnumerator *enumerator;
+	GList *devices, *iter;
+
 	/* And read initial device list */
 	enumerator = g_udev_enumerator_new (priv->udev_client);
 	g_udev_enumerator_add_match_subsystem (enumerator, "net");
@@ -4488,16 +4504,6 @@ setup (NMPlatform *platform)
 	}
 	g_list_free (devices);
 	g_object_unref (enumerator);
-
-	/* request all IPv6 addresses (hopeing that there is at least one), to check for
-	 * the IFA_FLAGS attribute. */
-	nle = nl_rtgen_request (priv->nlh_event, RTM_GETADDR, AF_INET6, NLM_F_DUMP);
-	if (nle < 0)
-		nm_log_warn (LOGD_PLATFORM, "Netlink error: requesting RTM_GETADDR failed with %s", nl_geterror (nle));
-
-	priv->wifi_data = g_hash_table_new_full (NULL, NULL, NULL, (GDestroyNotify) wifi_utils_deinit);
-
-	return TRUE;
 }
 
 static void
@@ -4535,6 +4541,7 @@ nm_linux_platform_class_init (NMLinuxPlatformClass *klass)
 	object_class->finalize = nm_linux_platform_finalize;
 
 	platform_class->setup = setup;
+	platform_class->setup_devices = setup_devices;
 
 	platform_class->sysctl_set = sysctl_set;
 	platform_class->sysctl_get = sysctl_get;

@@ -357,6 +357,7 @@ typedef struct {
 	GObjectClass parent;
 
 	gboolean (*setup) (NMPlatform *);
+	void (*setup_devices) (NMPlatform *);
 
 	gboolean (*sysctl_set) (NMPlatform *, const char *path, const char *value);
 	char * (*sysctl_get) (NMPlatform *, const char *path);
