@@ -279,6 +279,14 @@ main (int argc, char **argv)
 #endif
 	}
 
+	if (nmtst_platform_is_root_test () && !g_getenv ("NMTST_NO_UNSHARE")) {
+		if (unshare (CLONE_NEWNET) != 0) {
+			int errsv = errno;
+
+			g_error ("unshare(CLONE_NEWNET) failed with %s (%d)", strerror (errsv), errsv);
+		}
+	}
+
 	SETUP ();
 
 	setup_tests ();
