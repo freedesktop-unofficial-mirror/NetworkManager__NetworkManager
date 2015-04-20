@@ -217,13 +217,9 @@ nm_ap_set_address (NMAccessPoint *ap, const char *addr)
 NM80211Mode
 nm_ap_get_mode (NMAccessPoint *ap)
 {
-	NM80211Mode mode;
+	g_return_val_if_fail (NM_IS_AP (ap), NM_802_11_MODE_UNKNOWN);
 
-	g_return_val_if_fail (NM_IS_AP (ap), -1);
-
-	g_object_get (ap, NM_AP_MODE, &mode, NULL);
-
-	return mode;
+	return NM_AP_GET_PRIVATE (ap)->mode;
 }
 
 static void
@@ -254,13 +250,9 @@ nm_ap_is_hotspot (NMAccessPoint *ap)
 gint8
 nm_ap_get_strength (NMAccessPoint *ap)
 {
-	gint8 strength;
-
 	g_return_val_if_fail (NM_IS_AP (ap), 0);
 
-	g_object_get (ap, NM_AP_STRENGTH, &strength, NULL);
-
-	return strength;
+	return NM_AP_GET_PRIVATE (ap)->strength;
 }
 
 void
@@ -281,13 +273,9 @@ nm_ap_set_strength (NMAccessPoint *ap, const gint8 strength)
 guint32
 nm_ap_get_freq (NMAccessPoint *ap)
 {
-	guint32 freq;
-
 	g_return_val_if_fail (NM_IS_AP (ap), 0);
 
-	g_object_get (ap, NM_AP_FREQUENCY, &freq, NULL);
-
-	return freq;
+	return NM_AP_GET_PRIVATE (ap)->freq;
 }
 
 void
@@ -309,13 +297,9 @@ nm_ap_set_freq (NMAccessPoint *ap,
 guint32
 nm_ap_get_max_bitrate (NMAccessPoint *ap)
 {
-	guint32 rate;
-
 	g_return_val_if_fail (NM_IS_AP (ap), 0);
 
-	g_object_get (ap, NM_AP_MAX_BITRATE, &rate, NULL);
-
-	return rate;
+	return NM_AP_GET_PRIVATE (ap)->max_bitrate;
 }
 
 void
