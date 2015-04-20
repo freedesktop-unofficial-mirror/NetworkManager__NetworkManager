@@ -374,6 +374,7 @@ nm_ap_update_from_properties (NMAccessPoint *ap,
                               const char *supplicant_path,
                               GVariant *properties)
 {
+	NMAccessPointPrivate *priv;
 	char *addr;
 	const guint8 *bytes;
 	GVariant *v;
@@ -385,6 +386,7 @@ nm_ap_update_from_properties (NMAccessPoint *ap,
 
 	g_return_if_fail (ap != NULL);
 	g_return_if_fail (properties != NULL);
+	priv = NM_AP_GET_PRIVATE (ap);
 
 	g_object_freeze_notify (G_OBJECT (ap));
 
@@ -461,6 +463,7 @@ nm_ap_update_from_properties (NMAccessPoint *ap,
 		nm_ap_set_supplicant_path (ap, supplicant_path);
 
 	nm_ap_set_last_seen (ap, nm_utils_get_monotonic_timestamp_s ());
+	priv->fake = FALSE;
 
 	g_object_thaw_notify (G_OBJECT (ap));
 }
