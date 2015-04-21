@@ -4147,8 +4147,9 @@ complete_slave (NMSettingConnection *s_con,
 		const char *checked_master = NULL;
 
 		if (type)
-			g_print (_("Warning: 'type' is currently ignored. "
-			           "We only support ethernet slaves for now.\n"));
+			g_print (_("Warning: 'type' is ignored. "
+			           "Use 'nmcli connection add \"%s\" ...' instead."),
+			           type);
 
 		if (nm_setting_connection_get_master (s_con)) {
 			/* Master already set. */
@@ -5734,6 +5735,9 @@ do_connection_add (NmCli *nmc, int argc, char **argv)
 	gboolean ifname_mandatory = TRUE;
 	const char *save = NULL;
 	gboolean save_bool = TRUE;
+	const char *master = NULL;
+	const char *checked_master = NULL;
+	const char *slave_type = NULL;
 	AddConnectionInfo *info = NULL;
 	const char *setting_name;
 	GError *error = NULL;
@@ -5742,6 +5746,7 @@ do_connection_add (NmCli *nmc, int argc, char **argv)
 	                         {"autoconnect", TRUE, &autoconnect, FALSE},
 	                         {"ifname",      TRUE, &ifname,      FALSE},
 	                         {"save",        TRUE, &save,        FALSE},
+	                         {"master",      TRUE, &master,      FALSE},
 	                         {NULL} };
 
 	rl_attempted_completion_function = (rl_completion_func_t *) nmcli_con_add_tab_completion;
@@ -5842,12 +5847,27 @@ do_connection_add (NmCli *nmc, int argc, char **argv)
 		default_name = unique_connection_name (nmc->connections, try_name);
 		g_free (try_name);
 	}
+
+	if (master) {
+		/* Verify master argument */
+		checked_master = normalized_master_for_slave (nmc->connections, master, slave_type, &slave_type);
+		if (!checked_master) {
+			g_string_printf (nmc->return_text,
+			                 _("Error: master='%s' doesn't refer to any existing profile.\n"),
+			                 master);
+			nmc->return_value = NMC_RESULT_ERROR_USER_INPUT;
+			goto error;
+		}
+	}
+
 	g_object_set (s_con,
 	              NM_SETTING_CONNECTION_ID, default_name,
 	              NM_SETTING_CONNECTION_UUID, uuid,
 	              NM_SETTING_CONNECTION_TYPE, setting_name,
 	              NM_SETTING_CONNECTION_AUTOCONNECT, auto_bool,
 	              NM_SETTING_CONNECTION_INTERFACE_NAME, ifname,
+		      NM_SETTING_CONNECTION_MASTER, checked_master,
+	              NM_SETTING_CONNECTION_SLAVE_TYPE, slave_type,
 	              NULL);
 	g_free (uuid);
 	g_free (default_name);
