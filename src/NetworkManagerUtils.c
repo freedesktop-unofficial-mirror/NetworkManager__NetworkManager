@@ -1782,15 +1782,15 @@ nm_utils_cmp_connection_by_autoconnect_priority (NMConnection **a, NMConnection 
 /**************************************************************************/
 
 static gint64 monotonic_timestamp_offset_sec;
-static gboolean monotonic_timestamp_initialized = FALSE;
+static int monotonic_timestamp_clock_mode = 0;
 
 static void
 monotonic_timestamp_get (struct timespec *tp)
 {
-	static int clock_mode = 0;
+	int clock_mode = 0;
 	int err = 0;
 
-	switch (clock_mode) {
+	switch (monotonic_timestamp_clock_mode) {
 	case 0:
 		/* the clock is not yet initialized (first run) */
 		err = clock_gettime (CLOCK_BOOTTIME, tp);
@@ -1799,7 +1799,6 @@ monotonic_timestamp_get (struct timespec *tp)
 			err = clock_gettime (CLOCK_MONOTONIC, tp);
 		} else
 			clock_mode = 1;
-		monotonic_timestamp_initialized = FALSE;
 		break;
 	case 1:
 		/* default, return CLOCK_BOOTTIME */
@@ -1815,7 +1814,7 @@ monotonic_timestamp_get (struct timespec *tp)
 	g_assert (err == 0); (void)err;
 	g_assert (tp->tv_nsec >= 0 && tp->tv_nsec < NM_UTILS_NS_PER_SECOND);
 
-	if (G_LIKELY (monotonic_timestamp_initialized))
+	if (G_LIKELY (clock_mode == 0))
 		return;
 
 	/* Calculate an offset for the time stamp.
@@ -1832,7 +1831,7 @@ monotonic_timestamp_get (struct timespec *tp)
 	 * wraps (~68 years).
 	 **/
 	monotonic_timestamp_offset_sec = (- ((gint64) tp->tv_sec)) + 1;
-	monotonic_timestamp_initialized = TRUE;
+	monotonic_timestamp_clock_mode = clock_mode;
 
 	if (nm_logging_enabled (LOGL_DEBUG, LOGD_CORE)) {
 		time_t now = time (NULL);
@@ -2209,6 +2208,8 @@ out:
  * E.g. if you passed @timestamp in as seconds, it will return boottime in seconds.
  * If @timestamp is a non-positive, it returns -1. Note that a (valid) monotonic-timestamp
  * is always positive.
+ *
+ * On older kernels that don't support CLOCK_BOOTTIME, the returned time is instead CLOCK_MONOTONIC.
  **/
 gint64
 nm_utils_monotonic_timestamp_as_boottime (gint64 timestamp, gint64 timestamp_ns_per_tick)
@@ -2225,19 +2226,15 @@ nm_utils_monotonic_timestamp_as_boottime (gint64 timestamp, gint64 timestamp_ns_
 	/* Check that the timestamp is in a valid range. */
 	g_return_val_if_fail (timestamp >= 0, -1);
 
-	/* timestamp == 0 is not a valid timestamp. Treat it special and return -1. */
-	if (timestamp <= 0)
-		return -1;
-
 	/* if the caller didn't yet ever fetch a monotonic-timestamp, he cannot pass any meaningful
 	 * value (because he has no idea what these timestamps would be). That would be a bug. */
-	g_return_val_if_fail (G_LIKELY (monotonic_timestamp_initialized), -1);
+	g_return_val_if_fail (G_LIKELY (monotonic_timestamp_clock_mode != 0), -1);
 
 	/* calculate the offset of monotonic-timestamp to boottime. offset_s is <= 1. */
 	offset = monotonic_timestamp_offset_sec * (NM_UTILS_NS_PER_SECOND / timestamp_ns_per_tick);
 
 	/* check for overflow. */
-	g_return_val_if_fail (offset>0 || timestamp < G_MAXINT64 + offset, G_MAXINT64);
+	g_return_val_if_fail (offset > 0 || timestamp < G_MAXINT64 + offset, G_MAXINT64);
 
 	return timestamp - offset;
 }
