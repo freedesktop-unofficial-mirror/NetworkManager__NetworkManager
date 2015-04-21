@@ -53,6 +53,7 @@ typedef struct {
 	NM80211Mode mode;
 	guint32 max_bitrate;
 	guint8 strength;
+	guint32 last_seen;
 } NMAccessPointPrivate;
 
 enum {
@@ -67,6 +68,7 @@ enum {
 	PROP_MAX_BITRATE,
 	PROP_STRENGTH,
 	PROP_BSSID,
+	PROP_LAST_SEEN,
 
 	LAST_PROP
 };
@@ -263,6 +265,23 @@ nm_access_point_get_strength (NMAccessPoint *ap)
 
 	_nm_object_ensure_inited (NM_OBJECT (ap));
 	return NM_ACCESS_POINT_GET_PRIVATE (ap)->strength;
+}
+
+/**
+ * nm_access_point_get_last_seen:
+ * @ap: a #NMAccessPoint
+ *
+ * Gets the last seen timestamp for the access point.
+ *
+ * Returns: the last seen time in seconds
+ **/
+guint32
+nm_access_point_get_last_seen (NMAccessPoint *ap)
+{
+	g_return_val_if_fail (NM_IS_ACCESS_POINT (ap), 0);
+
+	_nm_object_ensure_inited (NM_OBJECT (ap));
+	return NM_ACCESS_POINT_GET_PRIVATE (ap)->last_seen;
 }
 
 /**
@@ -482,6 +501,9 @@ get_property (GObject *object,
 	case PROP_STRENGTH:
 		g_value_set_uchar (value, nm_access_point_get_strength (ap));
 		break;
+	case PROP_LAST_SEEN:
+		g_value_set_uint (value, nm_access_point_get_last_seen (ap));
+		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -512,6 +534,7 @@ register_properties (NMAccessPoint *ap)
 		{ NM_ACCESS_POINT_MODE,        &priv->mode },
 		{ NM_ACCESS_POINT_MAX_BITRATE, &priv->max_bitrate },
 		{ NM_ACCESS_POINT_STRENGTH,    &priv->strength },
+		{ NM_ACCESS_POINT_LAST_SEEN,   &priv->last_seen },
 		{ NULL },
 	};
 
@@ -671,4 +694,17 @@ nm_access_point_class_init (NMAccessPointClass *ap_class)
 		                     0, G_MAXUINT8, 0,
 		                     G_PARAM_READABLE |
 		                     G_PARAM_STATIC_STRINGS));
+
+	/**
+	 * NMAccessPoint:last-seen:
+	 *
+	 * The last seen timestamp of the access point.
+	 **/
+	g_object_class_install_property
+		(object_class, PROP_LAST_SEEN,
+		 g_param_spec_uint (NM_ACCESS_POINT_LAST_SEEN,
+						"Last Seen",
+						"Last Seen",
+						0, G_MAXUINT32, 0,
+						G_PARAM_READABLE));
 }

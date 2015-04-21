@@ -1559,7 +1559,7 @@ cull_scan_list (NMDeviceWifi *self)
 	g_hash_table_iter_init (&iter, priv->aps);
 	while (g_hash_table_iter_next (&iter, NULL, (gpointer) &ap)) {
 		const guint prune_interval_s = SCAN_INTERVAL_MAX * 3;
-		gint32 last_seen;
+		guint32 last_seen;
 
 		/* Don't cull the associated AP or manually created APs */
 		if (ap == priv->current_ap)
