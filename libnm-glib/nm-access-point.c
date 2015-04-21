@@ -705,6 +705,6 @@ nm_access_point_class_init (NMAccessPointClass *ap_class)
 		 g_param_spec_uint (NM_ACCESS_POINT_LAST_SEEN,
 						"Last Seen",
 						"Last Seen",
-						0, G_MAXUINT32, 0,
+						0, G_MAXUINT32, G_MAXUINT32,
 						G_PARAM_READABLE));
 }

@@ -105,8 +105,8 @@ void    nm_ap_set_max_bitrate (NMAccessPoint *ap, guint32 bitrate);
 gboolean nm_ap_get_fake (const NMAccessPoint *ap);
 void     nm_ap_set_fake (NMAccessPoint *ap, gboolean fake);
 
-guint32   nm_ap_get_last_seen (const NMAccessPoint *ap);
-void     nm_ap_set_last_seen (NMAccessPoint *ap, guint32 last_seen);
+gint32   nm_ap_get_last_seen (const NMAccessPoint *ap);
+void     nm_ap_set_last_seen (NMAccessPoint *ap, gint32 last_seen);
 
 gboolean nm_ap_check_compatible (NMAccessPoint *self,
                                  NMConnection *connection);

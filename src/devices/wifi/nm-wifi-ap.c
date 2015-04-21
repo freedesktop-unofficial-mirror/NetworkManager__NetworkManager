@@ -62,7 +62,7 @@ typedef struct
 	/* Non-scanned attributes */
 	gboolean			fake;	/* Whether or not the AP is from a scan */
 	gboolean            hotspot;    /* Whether the AP is a local device's hotspot network */
-	guint32              last_seen;  /* Timestamp when the AP was seen lastly (obtained via nm_utils_get_monotonic_timestamp_s()) */
+	gint32              last_seen;  /* Timestamp when the AP was seen lastly (obtained via nm_utils_get_monotonic_timestamp_s()) */
 } NMAccessPointPrivate;
 
 #define NM_AP_GET_PRIVATE(o) (G_TYPE_INSTANCE_GET_PRIVATE ((o), NM_TYPE_AP, NMAccessPointPrivate))
@@ -148,9 +148,6 @@ set_property (GObject *object, guint prop_id,
 		break;
 	case PROP_HW_ADDRESS:
 		break;
-	case PROP_LAST_SEEN:
-		nm_ap_set_last_seen (ap, g_value_get_uint (value));
-		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
 		break;
@@ -201,8 +198,10 @@ get_property (GObject *object, guint prop_id,
 		break;
 	case PROP_LAST_SEEN:
 		g_value_set_uint (value,
-		                  nm_utils_monotonic_timestamp_as_boottime (priv->last_seen,
-		                                                            NM_UTILS_NS_PER_SECOND));
+		                  priv->last_seen > 0
+		                  ? nm_utils_monotonic_timestamp_as_boottime (priv->last_seen,
+		                                                              NM_UTILS_NS_PER_SECOND)
+		                  : G_MAXUINT32);
 		break;
 	default:
 		G_OBJECT_WARN_INVALID_PROPERTY_ID (object, prop_id, pspec);
@@ -306,10 +305,10 @@ nm_ap_class_init (NMAccessPointClass *ap_class)
 	g_object_class_install_property
 		(object_class, PROP_LAST_SEEN,
 		 g_param_spec_uint (NM_AP_LAST_SEEN,
-							"Last Seen",
-							"Last Seen",
-							0, G_MAXUINT32, 0,
-							G_PARAM_READWRITE | G_PARAM_CONSTRUCT_ONLY));
+		                    "Last Seen",
+		                    "Last Seen",
+		                    0, G_MAXUINT32, G_MAXUINT32,
+		                    G_PARAM_READABLE));
 
 	nm_dbus_manager_register_exported_type (nm_dbus_manager_get (),
 	                                        G_TYPE_FROM_CLASS (ap_class),
@@ -477,7 +476,7 @@ nm_ap_update_from_properties (NMAccessPoint *ap,
 	if (!nm_ap_get_supplicant_path (ap))
 		nm_ap_set_supplicant_path (ap, supplicant_path);
 
-	nm_ap_set_last_seen (ap, (guint32) nm_utils_get_monotonic_timestamp_s());
+	nm_ap_set_last_seen (ap, nm_utils_get_monotonic_timestamp_s ());
 
 	g_object_thaw_notify (G_OBJECT (ap));
 }
@@ -735,7 +734,7 @@ nm_ap_dump (NMAccessPoint *ap, const char *prefix)
 	nm_log_dbg (LOGD_WIFI_SCAN, "    quality   %d", priv->strength);
 	nm_log_dbg (LOGD_WIFI_SCAN, "    frequency %d", priv->freq);
 	nm_log_dbg (LOGD_WIFI_SCAN, "    max rate  %d", priv->max_bitrate);
-	nm_log_dbg (LOGD_WIFI_SCAN, "    last-seen %d", priv->last_seen);
+	nm_log_dbg (LOGD_WIFI_SCAN, "    last-seen %d", (int) priv->last_seen);
 }
 
 const char *
@@ -1069,7 +1068,7 @@ void nm_ap_set_fake (NMAccessPoint *ap, gboolean fake)
  * APs older than a certain date are dropped from the list.
  *
  */
-guint32
+gint32
 nm_ap_get_last_seen (const NMAccessPoint *ap)
 {
 	g_return_val_if_fail (NM_IS_AP (ap), 0);
@@ -1078,7 +1077,7 @@ nm_ap_get_last_seen (const NMAccessPoint *ap)
 }
 
 void
-nm_ap_set_last_seen (NMAccessPoint *ap, guint32 last_seen)
+nm_ap_set_last_seen (NMAccessPoint *ap, gint32 last_seen)
 {
 	NMAccessPointPrivate *priv;
 
